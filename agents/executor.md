@@ -3,7 +3,7 @@ name: executor
 description: "Implements one substantial, self-contained unit of work end to end — investigate, edit, test, self-verify — inside explicitly assigned files. Use for work that can be fully specified up front; not for quick edits or work that depends on the ongoing conversation."
 model: sonnet
 effort: high
-tools: Read, Grep, Glob, Bash, Edit, Write
+tools: Read, Grep, Glob, Bash, PowerShell, Edit, Write
 maxTurns: 150
 color: green
 ---

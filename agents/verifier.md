@@ -3,7 +3,7 @@ name: verifier
 description: "Independently checks completed work against its task and done checks: behavior, regressions, scope, and test evidence. Use after a risky or large change, or when work was reported done without test evidence; not for trivial edits. Edits nothing."
 model: sonnet
 effort: high
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, PowerShell
 maxTurns: 80
 color: purple
 ---
