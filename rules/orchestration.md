@@ -1,79 +1,70 @@
 # Orchestration policy
 
-This policy is for the main conversation. If you are running as a subagent or
-as an agent-team teammate, skip it: your agent definition and the task you were
-given govern your work.
+This policy is for the main conversation. Subagents and agent-team teammates
+follow their agent definitions and assigned tasks instead.
 
 ## When to delegate
 
-Work inline by default. A handoff costs a fresh context, a written packet, and
-a review of the result, so delegate only when one of these holds:
+Work inline by default. Delegate only for:
 
-- **Substantial, self-contained implementation**: a unit you can specify
-  completely up front, with its own files and its own checks → `executor`.
-- **High-volume investigation**: many files, logs, or web pages where you need
-  the conclusion, not the raw material → `researcher`. For a quick codebase
-  lookup, search directly or use the built-in Explore agent.
-- **Independent check**: work that you or a worker produced and that is risky
-  (data loss, security, public API, migrations), large, or reported done
-  without test evidence → `verifier`. When the user asks you to check someone
-  else's change, you are already the fresh eyes; check it yourself. Routine
-  changes you can check yourself in a few tool calls need no verifier.
-- **Parallel tracks**: two or more such units that do not depend on each other.
+- **Implementation**: substantial work you can specify completely up front,
+  with assigned files and checks → `executor`.
+- **Research**: a question that requires reading many files, logs, or web pages
+  → `researcher`. Handle quick lookups directly or with the built-in Explore
+  agent.
+- **Verification**: completed work by you or a worker that is large, risky
+  (data loss, security, public APIs, migrations), or lacks test evidence
+  → `verifier`. Review someone else's change yourself when the user asks.
+  Check routine changes inline.
+- **Parallel work**: two or more such tasks that do not depend on each other.
 
-Stay inline when the work is quick, tightly coupled to the conversation,
-depends on decisions still being made, or would take longer to specify than to
-do.
+Stay inline for quick work, work that needs ongoing decisions or conversation
+context, and tasks that take longer to specify than to do.
 
-Scale to the task: most tasks need no agents, a multi-part feature needs one to
-three, and more than four at once is rarely worth the coordination.
+Most tasks need no agents. Multi-part features usually need one to three;
+more than four at once rarely helps.
 
-Let each agent run on the model and effort in its definition; pass no model
-override when spawning. The definitions are the cost and quality decision.
-When installed as a plugin the agents are named `fable-orchestrator:executor`
-and so on.
+Use each agent's configured model and effort. Do not pass a model override
+when spawning. Plugin agent names are `fable-orchestrator:executor` and so on.
 
 ## Task packets
 
-A worker starts with none of this conversation. Every packet states:
+A worker does not have this conversation. Include in every task packet:
 
-- **Outcome and why**: what must be true when done, and the problem it solves.
+- **Outcome and why**: the expected result and the problem it solves.
 - **Context**: files, commands, and logs to start from; decisions already made;
   approaches already ruled out.
-- **Scope**: the files or directories the worker owns, and what must stay
+- **Scope**: files or directories the worker may change, and what must stay
   untouched.
-- **Starting state**: the commit the work starts from, and any uncommitted
-  changes already in the tree, so they are preserved and not mistaken for the
-  worker's own.
-- **Done checks**: commands or observable behavior that prove the outcome.
-- **Authorizations**: anything beyond editing owned files and running local
+- **Commit and existing changes**: the starting commit and uncommitted edits
+  to preserve. The worker must distinguish these from its own edits.
+- **Done checks**: commands to run or behavior to check.
+- **Authorizations**: anything beyond editing assigned files and running local
   checks, such as installing dependencies, migrations, or commits. Omitted
   means not authorized.
 
-A verifier's packet carries the original task, the done checks, the starting
-state, and where the changes are — never the implementer's report or
-conclusions.
+A verifier's packet includes the original task, done checks, starting commit,
+existing edits, and where to find the changes. Do not include the implementer's
+report or conclusions.
 
 ## Parallel work
 
-- Parallel editors own disjoint files and share no mutable state: lockfiles,
-  generated code, build output, ports, databases. If they would, run them in
-  sequence.
-- Follow-ups on the same unit go to the same worker (resume it); a new unit
-  gets a new worker.
+- Parallel editors must own separate files and share no mutable state,
+  including lockfiles, generated code, build output, ports, or databases.
+  Otherwise, run them in sequence.
+- Resume the same worker for follow-ups. Use a new worker for a new task.
 
 ## Results
 
-- Worker reports are evidence, not truth. Read the resulting changes, check
-  that they integrate, and ground every completion claim in a tool or test
-  result you have seen.
-- When a worker returns blocked or partial, supply what it lacked — the
-  answer, or scope and authorizations that are yours to give — and resume it.
-  When it returns failing with nothing missing, take the work over inline
-  rather than retrying.
-- Workers cannot ask the user anything. Questions they return are yours to
-  answer, or to pass to the user when they involve a destructive, irreversible,
-  or externally visible action, a scope or security change, or input only the
-  user has.
-- Assessment requests are read-only. Preserve changes you did not make.
-- Give the user one integrated answer, not a relay of worker reports.
+- Verify worker reports against the resulting changes and checks. Check that
+  the changes work together. Only claim completion when you have seen the
+  supporting tool or test result.
+- If a worker returns blocked or partial, resolve its question or update its
+  scope and permissions within your authority, then resume it. If it fails
+  with nothing missing, finish the work inline.
+- Workers cannot ask the user questions. Handle their questions yourself.
+  Ask the user when a question concerns destructive, irreversible, or
+  externally visible actions, scope or security changes, or information only
+  the user has.
+- Assessments are read-only. Preserve changes you did not make.
+- Combine the results into one answer for the user.
