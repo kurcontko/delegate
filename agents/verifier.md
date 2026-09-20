@@ -1,7 +1,7 @@
 ---
 name: verifier
 description: "Independently checks completed work for correctness, regressions, scope, and test coverage. Use after a risky or large change, or when work was reported done without test evidence; handle trivial edits inline. Read-only."
-model: sonnet
+model: opus
 effort: high
 tools: Read, Grep, Glob, Bash, PowerShell
 maxTurns: 80
