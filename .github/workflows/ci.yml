@@ -149,6 +149,34 @@ jobs:
           echo "installer round trip ok"
         shell: bash
 
+      # The installed names are generic, so a user may already have a file at
+      # one of them. tests/test_install.py covers the ownership rules in full;
+      # this is the same promise checked through the script's own shebang.
+      - name: A file the user already had survives install and uninstall
+        run: |
+          set -eu
+          dest="$(mktemp -d)"
+          mkdir -p "$dest/agents"
+          printf 'my existing agent\n' > "$dest/agents/researcher.md"
+
+          if CLAUDE_CONFIG_DIR="$dest" ./install.sh; then
+            echo "expected install.sh to refuse to overwrite researcher.md" >&2
+            exit 1
+          fi
+          if [ -e "$dest/agents/executor.md" ]; then
+            echo "a refused install still wrote executor.md" >&2
+            exit 1
+          fi
+
+          CLAUDE_CONFIG_DIR="$dest" ./install.sh --uninstall
+
+          if ! grep -q '^my existing agent$' "$dest/agents/researcher.md"; then
+            echo "install.sh destroyed a file it did not install" >&2
+            exit 1
+          fi
+          echo "installer collision ok"
+        shell: bash
+
   fixtures:
     name: Eval fixtures (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
