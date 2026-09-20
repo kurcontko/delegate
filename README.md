@@ -68,13 +68,18 @@ commands that change files, git state, dependencies, or anything remote.
 Part of that is enforced. The plugin ships a `PreToolUse` hook,
 `scripts/readonly_guard.py`, which inspects every shell command from those two
 agents. For git it is an allow list: a subcommand runs only if the guard knows
-it to be read-only (`status`, `log`, `diff`, `show`, `blame`, `fetch`,
-`rev-parse`, `stash list`, `branch` and `tag` listings, `config` reads, and the
-like). Everything else is denied, including plumbing such as `update-index` and
-`symbolic-ref`, aliases, and any subcommand the guard has never heard of. For
+it to be read-only (`status`, `log`, `diff`, `show`, `blame`, `rev-parse`,
+`ls-remote`, `stash list`, `reflog show`, `branch` and `tag` listings, `config`
+reads, and the like). Everything else is denied, including plumbing such as
+`update-index` and `symbolic-ref`, aliases, and any subcommand, verb or
+`branch`/`tag` flag the guard has never heard of. `git fetch` is denied too,
+because it moves refs: fetch in the main conversation before delegating, or
+have the worker read the remote with `git ls-remote`. For
 dependency managers it denies the install and remove verbs (npm, pnpm, yarn,
-bun, pip, uv, poetry, cargo, brew, apt, gem, `go get`) and leaves `npm test`,
-`pytest`, `cargo test`, `uv run pytest` alone. The main conversation and the
+bun, pip, uv, poetry, cargo, brew, apt, gem, `go get`), two-word forms such as
+`npm audit fix` and `go mod tidy`, and the same commands run through
+`uv run`, `poetry run`, `npm exec` or `npx`. It leaves `npm test`, `pytest`,
+`cargo test`, `uv run pytest` alone. The main conversation and the
 `executor` are never affected. The guard parses Bash commands with `shlex`, so
 it follows `&&`, pipes, newlines, `$(...)`, wrappers like `sudo` and `xargs`,
 and absolute paths, and it does not fire on a mutating word inside a quoted

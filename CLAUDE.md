@@ -17,8 +17,8 @@ with `claude --plugin-dir .`; a plain `claude` session loads neither.
   model calls, so ask before running it.
 - `scripts/readonly_guard.py` is the only enforcement in the plugin: it denies
   git-state and dependency changes from `researcher` and `verifier`. Git is an
-  allow list, so an unknown subcommand is denied; keep it that way. Every
-  change to a deny or allow rule needs a test row in
+  allow list at every level, so an unknown subcommand, verb or flag is denied;
+  keep it that way. Every change to a deny or allow rule needs a test row in
   `tests/test_readonly_guard.py`.
 - `install.sh` writes generic names into a directory the user also owns. It may
   only replace or delete files its manifest says it wrote; `tests/test_install.py`

@@ -84,42 +84,36 @@ GIT_OPTS_WITH_VALUE = {
 
 # git subcommands that never change the working tree, the index, local refs or
 # the config, whatever their arguments. Anything not here and not handled
-# explicitly in `check_git` is denied. `fetch` is here on purpose: it only
-# moves remote-tracking refs, and the workers need it to compare against a
-# remote.
+# explicitly in `check_git` is denied. `fetch` is absent: it moves
+# remote-tracking refs, writes FETCH_HEAD, and with a refspec or `--prune-tags`
+# rewrites local refs. `ls-remote` reads a remote without writing anything.
 GIT_READ_ONLY = {
     "status", "diff", "log", "show", "blame", "annotate", "ls-files",
     "ls-tree", "ls-remote", "rev-parse", "rev-list", "describe", "grep",
-    "cat-file", "shortlog", "merge-base", "fetch", "diff-tree", "diff-index",
+    "cat-file", "shortlog", "merge-base", "diff-tree", "diff-index",
     "diff-files", "show-ref", "show-branch", "for-each-ref", "name-rev",
     "whatchanged", "range-diff", "cherry", "count-objects", "verify-commit",
     "verify-tag", "check-ignore", "check-attr", "check-ref-format", "var",
     "version", "help",
 }
 
-GIT_TAG_WRITE_FLAGS = {
-    "-a", "-s", "-d", "-f", "-m", "-F", "-u", "--annotate", "--sign",
-    "--delete", "--force", "--message", "--file", "--local-user", "--edit",
-    "--cleanup", "--create-reflog", "--no-sign",
-}
+# `tag` and `branch` list or write depending on their flags. They pass only
+# when every flag is a listing flag; a name with no listing flag creates.
 GIT_TAG_LIST_FLAGS = {
     "-l", "--list", "-n", "-i", "--ignore-case", "--contains", "--no-contains",
     "--merged", "--no-merged", "--points-at", "--sort", "--format", "--column",
-    "--omit-empty", "--color",
-}
-
-GIT_BRANCH_WRITE_FLAGS = {
-    "-d", "-D", "-m", "-M", "-c", "-C", "-f", "-u", "--delete", "--move",
-    "--copy", "--force", "--set-upstream", "--set-upstream-to",
-    "--unset-upstream", "--edit-description", "--track", "--no-track",
-    "--create-reflog",
+    "--no-column", "--omit-empty", "--color", "--no-color",
 }
 GIT_BRANCH_LIST_FLAGS = {
     "-a", "-r", "-v", "-vv", "-l", "-i", "--all", "--remotes", "--verbose",
     "--list", "--show-current", "--contains", "--no-contains", "--merged",
     "--no-merged", "--points-at", "--sort", "--format", "--column",
-    "--ignore-case", "--color",
+    "--no-column", "--ignore-case", "--omit-empty", "--color", "--no-color",
+    "--abbrev", "--no-abbrev",
 }
+# Letters that may be bundled into one short flag, as in `git branch -avv`.
+GIT_TAG_LIST_LETTERS = set("li")
+GIT_BRANCH_LIST_LETTERS = set("arvli")
 
 # Subcommands with verbs of their own: verb -> the read-only ones. `None` is
 # the bare form (`git remote`, `git remote -v`). Bare `git stash` is a push, so
@@ -130,13 +124,10 @@ GIT_SUB_ALLOW = {
     "submodule": {None, "status", "summary"},
     "remote": {None, "show", "get-url"},
     "bisect": {"log"},
+    "reflog": {None, "show", "list", "exists"},
     "notes": {None, "list", "show"},
     "lfs": {"ls-files", "status", "env"},
 }
-# `git reflog <ref>` is a read with a free-form first word, so reflog alone
-# names its writes instead.
-GIT_REFLOG_WRITE = {"expire", "delete", "drop"}
-
 # Dependency managers: first non-flag word -> denied verbs.
 PKG_DENY = {
     "npm": {"install", "i", "add", "remove", "uninstall", "rm", "un", "ci",
@@ -157,6 +148,34 @@ PKG_DENY = {
     "gem": {"install", "uninstall", "update"},
     "go": {"get", "install"},
     "uv": {"add", "remove", "sync", "lock"},
+}
+
+# Two-word forms: manager -> first word -> second words that change dependencies.
+PKG_DENY_PAIRS = {
+    "npm": {"audit": {"fix"}},
+    "pnpm": {"audit": {"--fix"}},
+    "go": {"mod": {"tidy", "edit", "vendor", "init"}},
+}
+
+# Verbs that run another command, which is checked in its own right.
+PKG_EXEC = {
+    "uv": {"run"},
+    "poetry": {"run"},
+    "npm": {"exec", "x"},
+    "pnpm": {"exec", "dlx"},
+    "yarn": {"exec", "dlx"},
+    "bun": {"x"},
+}
+PKG_RUNNERS = {"npx", "pnpx", "bunx", "uvx"}
+
+# First words that settle a dependency-manager command as harmless. Any other
+# first word may be the value of a global option (`pip --proxy URL install`),
+# so the words after it are searched for a denied verb as well.
+PKG_SAFE = {
+    "test", "t", "run", "run-script", "start", "exec", "ls", "list", "ll",
+    "la", "show", "view", "info", "outdated", "why", "search", "tree", "check",
+    "build", "vet", "fmt", "doc", "bench", "clippy", "metadata", "freeze",
+    "help", "version", "env", "x", "dlx",
 }
 
 ADVICE = (
@@ -289,6 +308,27 @@ def first_word(args):
     return None
 
 
+def lists_only(rest, flags, letters):
+    """True if `git tag`/`git branch` arguments can only list.
+
+    Every flag has to be a known listing flag, and a positional argument is a
+    pattern or a commit only when some listing flag is there to take it.
+    """
+    listing = False
+    positional = False
+    for arg in rest:
+        if not arg.startswith("-") or arg == "-":
+            positional = True
+            continue
+        name = arg.split("=", 1)[0]
+        bundled = not name.startswith("--") and set(name[1:]) <= letters
+        numbered = "-n" in flags and re.match(r"^-n[0-9]+$", name)
+        if not (name in flags or bundled or numbered):
+            return False
+        listing = True
+    return listing or not positional
+
+
 def strip_wrappers(argv):
     """Drop leading env assignments and wrappers such as `sudo` or `xargs`.
 
@@ -351,23 +391,19 @@ def check_git(args):
     if sub in GIT_READ_ONLY:
         return None
 
+    if sub == "fetch":
+        return ("`git fetch` moves refs and writes FETCH_HEAD (`git ls-remote` "
+                "reads a remote without writing)")
+
     if sub == "tag":
-        if any(a.split("=")[0] in GIT_TAG_WRITE_FLAGS for a in rest):
-            return "`git tag` creates or deletes a tag"
-        if any(a.split("=")[0] in GIT_TAG_LIST_FLAGS for a in rest):
+        if lists_only(rest, GIT_TAG_LIST_FLAGS, GIT_TAG_LIST_LETTERS):
             return None
-        if first_word(rest) is not None:
-            return "`git tag` creates a tag"
-        return None
+        return "this `git tag` is not a plain listing"
 
     if sub == "branch":
-        if any(a.split("=")[0] in GIT_BRANCH_WRITE_FLAGS for a in rest):
-            return "`git branch` creates, deletes or moves a branch"
-        if any(a.split("=")[0] in GIT_BRANCH_LIST_FLAGS for a in rest):
+        if lists_only(rest, GIT_BRANCH_LIST_FLAGS, GIT_BRANCH_LIST_LETTERS):
             return None
-        if first_word(rest) is not None:
-            return "`git branch` creates a branch"
-        return None
+        return "this `git branch` is not a plain listing"
 
     if sub == "config":
         readonly = {"get", "list"}
@@ -378,11 +414,6 @@ def check_git(args):
             return None
         return "`git config` writes configuration"
 
-    if sub == "reflog":
-        if first_word(rest) in GIT_REFLOG_WRITE:
-            return "`git reflog %s` changes git state" % first_word(rest)
-        return None
-
     allowed = GIT_SUB_ALLOW.get(sub)
     if allowed is not None:
         verb = first_word(rest)
@@ -390,40 +421,82 @@ def check_git(args):
             return None
         if verb is None:
             return "bare `git %s` changes git state" % sub
-        return ("`git %s %s` is not one of the read-only `git %s` commands"
-                % (sub, verb, sub))
+        # `git reflog main` lands here too: spell it `git reflog show main`.
+        return ("`git %s %s` is not one of the read-only `git %s` commands "
+                "(%s)" % (sub, verb, sub,
+                          ", ".join(sorted(v for v in allowed if v))))
 
     # The allow list is the contract: unknown means denied.
     return "`git %s` is not a git command this guard knows to be read-only" % sub
 
 
-def check_package(name, args):
+def denied_verb(args, denied):
+    """The denied verb a dependency-manager command runs, or None."""
     verb = first_word(args)
+    if verb in denied:
+        return verb
+    if verb is None or verb in PKG_SAFE:
+        return None
+    # Global options are not modelled, so `verb` may be an option's value and
+    # the real verb may come later. Everything after `--` belongs to a script.
+    before = args[:args.index("--")] if "--" in args else args
+    for arg in before:
+        if arg.lower() in denied:
+            return arg.lower()
+    return None
 
+
+def denied_pair(args, pairs):
+    """The denied two-word form a command runs, such as `audit fix`, or None."""
+    if first_word(args) in PKG_SAFE:
+        return None
+    before = args[:args.index("--")] if "--" in args else args
+    words = [arg.lower() for arg in before]
+    for first, seconds in pairs.items():
+        if first in words:
+            for word in words[words.index(first) + 1:]:
+                if word in seconds:
+                    return "%s %s" % (first, word)
+    return None
+
+
+def check_package(name, args, depth=0):
     if name in ("python", "python3", "python2"):
         if "-m" in args:
             idx = args.index("-m")
             if idx + 1 < len(args) and args[idx + 1] == "pip":
-                return check_package("pip", args[idx + 2:])
+                return check_package("pip", args[idx + 2:], depth)
         return None
 
-    if name == "uv":
-        if verb == "pip":
-            rest = args[args.index("pip") + 1:] if "pip" in args else []
-            if first_word(rest) in ("install", "uninstall", "sync"):
-                return "`uv pip %s` changes dependencies" % first_word(rest)
-            return None
-        if verb in PKG_DENY["uv"]:
-            return "`uv %s` changes dependencies" % verb
-        return None
+    if name in PKG_RUNNERS:
+        return scan_positions(args, depth)
 
-    if name == "yarn" and verb is None:
+    if name == "yarn" and first_word(args) is None:
         # Bare `yarn` installs from the lockfile in Yarn 1.
         return "bare `yarn` installs dependencies"
 
     denied = PKG_DENY.get(name)
-    if denied and verb in denied:
-        return "`%s %s` changes dependencies" % (name, verb)
+    if denied:
+        verb = denied_verb(args, denied)
+        if verb:
+            return "`%s %s` changes dependencies" % (name, verb)
+
+    if name == "uv" and "pip" in args and first_word(args) not in PKG_SAFE:
+        verb = denied_verb(args[args.index("pip") + 1:],
+                           {"install", "uninstall", "sync"})
+        if verb:
+            return "`uv pip %s` changes dependencies" % verb
+
+    pair = denied_pair(args, PKG_DENY_PAIRS.get(name, {}))
+    if pair:
+        return "`%s %s` changes dependencies" % (name, pair)
+
+    # `uv run pip install x`: where the inner command starts depends on the
+    # runner's own options, so every position after the verb is checked.
+    verb = first_word(args)
+    if verb in PKG_EXEC.get(name, ()):
+        lowered = [arg.lower() for arg in args]
+        return scan_positions(args[lowered.index(verb) + 1:], depth)
     return None
 
 
@@ -448,7 +521,7 @@ def check_segment(argv, depth, scan=True):
     if name in POWERSHELLS:
         return scan_text(" ".join(args), depth + 1)
 
-    return check_package(name, args)
+    return check_package(name, args, depth)
 
 
 def check_command(command, depth=0):

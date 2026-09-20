@@ -127,6 +127,28 @@ DENIED_GIT = [
     "git stash drop",
     "git stash clear",
     "git lfs pull",
+    # fetch moves remote-tracking refs at best and local refs at worst.
+    "git fetch",
+    "git fetch origin",
+    "git fetch --all --prune",
+    "git fetch --prune --prune-tags origin",
+    "git fetch origin other:refs/heads/main",
+    # Verb handlers name their reads; every other verb is denied, known or not.
+    "git reflog write refs/heads/main abc123 def456 message",
+    "git reflog frobnicate",
+    "git reflog main",
+    "git stash frobnicate",
+    "git remote frobnicate",
+    "git worktree frobnicate",
+    # tag and branch pass only on listing flags.
+    "git branch --mystery",
+    "git branch --mystery-write=x",
+    "git branch -av newthing --mystery",
+    "git branch -ad oldthing",
+    "git branch --list -d oldthing",
+    "git tag --mystery",
+    "git tag -ld v1.0",
+    "git tag -v v1.0",
     # An alias can point anywhere, so an unknown name is never trusted.
     "git -c alias.st=commit st",
     "git frobnicate --all",
@@ -148,8 +170,6 @@ ALLOWED_GIT = [
     "git cat-file -p HEAD",
     "git shortlog -sn",
     "git merge-base main HEAD",
-    "git fetch",
-    "git fetch --all --prune",
     "git stash list",
     "git stash show -p",
     "git tag",
@@ -176,7 +196,15 @@ ALLOWED_GIT = [
     "git submodule status",
     "git bisect log",
     "git reflog show main",
-    "git reflog main",
+    "git reflog show -n 5 main",
+    "git reflog list",
+    "git reflog exists refs/heads/main",
+    "git reflog -5",
+    "git branch -avv",
+    "git branch -ra --sort=-committerdate",
+    "git branch --no-color --list 'feature/*'",
+    "git tag -n5",
+    "git tag -li 'V*'",
     "git remote get-url origin",
     "git submodule",
     "git submodule summary",
@@ -228,6 +256,8 @@ DENIED_PKG = [
     "uv remove httpx",
     "uv sync",
     "uv pip install httpx",
+    "uv pip sync requirements.txt",
+    "uv add pip",
     "poetry add httpx",
     "poetry remove httpx",
     "poetry install",
@@ -245,6 +275,39 @@ DENIED_PKG = [
     "gem install bundler",
     "go get example.com/x",
     "go install example.com/x@latest",
+    # Two-word forms.
+    "npm audit fix",
+    "npm audit fix --force",
+    "npm --prefix /tmp/project audit fix",
+    "pnpm audit --fix",
+    "go mod tidy",
+    "go mod edit -require=example.com/x@v1.0.0",
+    "go mod vendor",
+    # Runners: the command they run is checked too.
+    "uv run pip install httpx",
+    "uv run --with requests pip install httpx",
+    "uv run git commit -m x",
+    "poetry run pip install httpx",
+    "poetry run git push",
+    "npm exec -- git commit -m x",
+    "pnpm exec npm install",
+    "npx -y npm install lodash",
+    "bunx git push",
+    "uv run bash -c 'git commit -m x'",
+    # A global option's value must not be mistaken for the verb.
+    "pip --proxy http://localhost:8080 install requests",
+    "pip --cache-dir /tmp/c --proxy http://localhost:8080 uninstall requests",
+    "python -m pip --proxy http://localhost:8080 install requests",
+    "npm --prefix /tmp/project install lodash",
+    "npm --registry https://r.example.com --prefix /tmp/p ci",
+    "pnpm --dir /tmp/project add react",
+    "yarn --cwd /tmp/project add react",
+    "cargo --config net.offline=true add serde",
+    "uv --directory /tmp/project add httpx",
+    "uv --directory /tmp/project pip install httpx",
+    "uv pip --python /usr/bin/python3 install httpx",
+    "poetry --directory /tmp/project add httpx",
+    "brew --cask install firefox",
 ]
 
 ALLOWED_PKG = [
@@ -277,6 +340,34 @@ ALLOWED_PKG = [
     "make test",
     "ls -la",
     "rg 'npm install' docs/",
+    "npm audit",
+    "npm audit --json",
+    "pnpm audit",
+    "go mod graph",
+    "go mod why example.com/x",
+    "go mod verify",
+    "go list -m all",
+    "uv run git status",
+    "uv run --with requests pytest -q",
+    "poetry run git log --oneline",
+    "npm exec -- eslint .",
+    "npx eslint .",
+    "npx tsc --noEmit",
+    # A safe first word settles it, whatever comes after.
+    "npm test install",
+    "npm run install-hooks",
+    "npm run build -- install",
+    "cargo test install",
+    "go test ./... -run install",
+    "uv run pytest -k add",
+    "uv run pip list",
+    "pip show install",
+    # An option value in first place, and no denied verb after it.
+    "pip --proxy http://localhost:8080 list",
+    "npm --prefix /tmp/project test",
+    "npm --prefix /tmp/project run build",
+    "yarn --cwd /tmp/project lint -- add",
+    "uv pip --python /usr/bin/python3 list",
 ]
 
 
@@ -290,6 +381,11 @@ class TestGitCommands(GuardTestCase):
         for command in ALLOWED_GIT:
             with self.subTest(command=command):
                 self.assertAllowed(command)
+
+    def test_fetch_reason_points_at_ls_remote(self):
+        _, out, _ = run(bash("git fetch origin"))
+        reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
+        self.assertIn("ls-remote", reason)
 
     def test_unknown_git_subcommand_names_itself_in_the_reason(self):
         _, out, _ = run(bash("git frobnicate --all"))
