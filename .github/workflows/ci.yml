@@ -1,0 +1,254 @@
+# CI for fable-orchestrator.
+#
+# Everything here is free, deterministic and offline-ish: no secrets, no
+# authentication, no model calls. In particular this workflow never runs
+# `claude plugin eval` -- every eval case is a real, paid model call on
+# someone's account, so the suite is run by hand, not by CI. CI only checks
+# that the eval files themselves are well formed and that their fixtures build.
+#
+# What can actually break for someone who copies this repo: a manifest that
+# disagrees with itself, an agent file Claude Code silently skips, a hook
+# pointing at a file that is not there, an installer that only works in bash.
+# One job per failure mode, so a red check names the problem.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  structure:
+    name: Repo structure
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # Stdlib-only, so the runner's preinstalled python3 is enough.
+      - name: Structural checks
+        run: python3 scripts/check_repo.py
+
+      # shellcheck is preinstalled on ubuntu runners; install.sh and the eval
+      # fixtures are POSIX sh and must stay that way.
+      - name: Shellcheck
+        run: shellcheck install.sh evals/*/fixture.sh
+
+  plugin-validate:
+    name: claude plugin validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # Official native installer; it drops the launcher at ~/.local/bin/claude.
+      - name: Install Claude Code
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Version
+        run: claude --version
+
+      # `claude plugin validate` is purely local: it reads the manifests and
+      # needs no login, no API key and no network (verified by running it with
+      # an empty HOME and no credentials). If that ever changes and this step
+      # starts failing on auth, the `structure` job above still covers the same
+      # ground -- manifest parsing, name agreement, hook targets, agent
+      # frontmatter -- so drop this step rather than adding a secret.
+      #
+      # No --strict: validation passes with one expected warning, because the
+      # plugin deliberately sets no `version` so installs track the latest
+      # commit.
+      - name: Validate plugin manifests
+        run: claude plugin validate .
+
+  unit-tests:
+    name: Unit tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # The hook scripts must run on a stock interpreter, so the oldest
+        # supported Python and the newest are both exercised on Linux and
+        # macOS.
+        os: [ubuntu-latest, macos-latest]
+        python-version: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Structural checks
+        run: python3 scripts/check_repo.py
+
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests -v
+
+  installer:
+    name: Installer round trip (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        # /bin/sh is dash on ubuntu and a bash in sh mode on macOS; install.sh
+        # is POSIX sh and has to work under both.
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install, verify, uninstall
+        run: |
+          set -eu
+          repo="$PWD"
+          dest="$(mktemp -d)"
+          files="agents/executor.md agents/researcher.md agents/verifier.md rules/orchestration.md"
+
+          # A file the installer does not own must survive both directions.
+          mkdir -p "$dest/agents"
+          printf 'keep me\n' > "$dest/agents/unrelated.md"
+
+          CLAUDE_CONFIG_DIR="$dest" ./install.sh
+
+          for f in $files; do
+            if [ ! -f "$dest/$f" ]; then
+              echo "install.sh did not create $f in CLAUDE_CONFIG_DIR" >&2
+              exit 1
+            fi
+            if ! cmp -s "$repo/$f" "$dest/$f"; then
+              echo "installed $f differs from the repo copy" >&2
+              exit 1
+            fi
+          done
+
+          CLAUDE_CONFIG_DIR="$dest" ./install.sh --uninstall
+
+          for f in $files; do
+            if [ -e "$dest/$f" ]; then
+              echo "install.sh --uninstall left $f behind" >&2
+              exit 1
+            fi
+          done
+
+          if ! grep -q '^keep me$' "$dest/agents/unrelated.md"; then
+            echo "install.sh touched an unrelated file in the agents directory" >&2
+            exit 1
+          fi
+          echo "installer round trip ok"
+        shell: bash
+
+      # The installed names are generic, so a user may already have a file at
+      # one of them. tests/test_install.py covers the ownership rules in full;
+      # this is the same promise checked through the script's own shebang.
+      - name: A file the user already had survives install and uninstall
+        run: |
+          set -eu
+          dest="$(mktemp -d)"
+          mkdir -p "$dest/agents"
+          printf 'my existing agent\n' > "$dest/agents/researcher.md"
+
+          if CLAUDE_CONFIG_DIR="$dest" ./install.sh; then
+            echo "expected install.sh to refuse to overwrite researcher.md" >&2
+            exit 1
+          fi
+          if [ -e "$dest/agents/executor.md" ]; then
+            echo "a refused install still wrote executor.md" >&2
+            exit 1
+          fi
+
+          CLAUDE_CONFIG_DIR="$dest" ./install.sh --uninstall
+
+          if ! grep -q '^my existing agent$' "$dest/agents/researcher.md"; then
+            echo "install.sh destroyed a file it did not install" >&2
+            exit 1
+          fi
+          echo "installer collision ok"
+        shell: bash
+
+  fixtures:
+    name: Eval fixtures (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fixtures only write small files and a local git repo. They always run
+      # in a fresh temp directory, never in the checkout.
+      - name: Every fixture builds
+        run: |
+          set -eu
+          repo="$PWD"
+          for fixture in evals/*/fixture.sh; do
+            tmp="$(mktemp -d)"
+            if ! (cd "$tmp" && "$repo/$fixture"); then
+              echo "$fixture failed to scaffold" >&2
+              exit 1
+            fi
+            echo "$fixture ok"
+          done
+        shell: bash
+
+      # This one fixture exists to leave a failing test in the tree: the case
+      # asks whether an uncommitted change is safe to ship, and the answer
+      # depends on the test failing before the change is reverted.
+      - name: assess-risky-change leaves a failing test
+        run: |
+          set -eu
+          repo="$PWD"
+          tmp="$(mktemp -d)"
+          cd "$tmp"
+          "$repo/evals/assess-risky-change/fixture.sh"
+
+          # The failure is the point, so its traceback is not logged.
+          if python3 test_store.py >/dev/null 2>&1; then
+            echo "expected test_store.py to FAIL on the scaffolded change, but it passed" >&2
+            exit 1
+          fi
+
+          git stash --quiet
+          if ! python3 test_store.py; then
+            echo "expected test_store.py to pass once the change is stashed" >&2
+            exit 1
+          fi
+          echo "assess-risky-change fixture ok"
+        shell: bash
+
+  hook:
+    name: SessionStart hook
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # Run the hook exactly as hooks.json declares it, with the plugin root
+      # Claude Code would pass, and check what the session would actually see.
+      - name: Hook emits the policy
+        run: |
+          set -eu
+          command="$(python3 -c "import json; print(json.load(open('hooks/hooks.json'))['hooks']['SessionStart'][0]['hooks'][0]['command'])")"
+          output="$(CLAUDE_PLUGIN_ROOT="$PWD" sh -c "$command")"
+          case "$output" in
+            '# Orchestration policy'*) echo "hook ok" ;;
+            *)
+              echo "SessionStart hook did not emit the policy; first line was:" >&2
+              printf '%s\n' "$output" | head -n 1 >&2
+              exit 1
+              ;;
+          esac
+        shell: bash
