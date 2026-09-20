@@ -8,9 +8,9 @@ on which model runs the main conversation.
 
 | Agent | Does | Model, effort | Tools |
 | --- | --- | --- | --- |
-| `executor` | Implements one self-contained unit end to end inside assigned files | `sonnet`, high | Read, Grep, Glob, Bash, Edit, Write |
+| `executor` | Implements one self-contained unit end to end inside assigned files | `sonnet`, high | Read, Grep, Glob, Bash, PowerShell, Edit, Write |
 | `researcher` | Answers one high-volume research question with evidence | `sonnet`, high | Everything except Edit, Write, NotebookEdit, Agent (MCP tools included) |
-| `verifier` | Independently checks completed work; returns a verdict | `sonnet`, high | Read, Grep, Glob, Bash |
+| `verifier` | Independently checks completed work; returns a verdict | `sonnet`, high | Read, Grep, Glob, Bash, PowerShell |
 
 ## Install
 
@@ -35,6 +35,12 @@ git clone https://github.com/kurcontko/fable-orchestrator
 ./fable-orchestrator/install.sh --uninstall
 ```
 
+The installer records what it wrote in `~/.claude/.fable-orchestrator-manifest`.
+It refuses to replace a file it did not write, such as a `researcher.md` of your
+own, or one you edited after installing; `--force` replaces them anyway.
+`--uninstall` removes only files that still match the manifest and leaves the
+rest in place.
+
 For one project only, copy `agents/*.md` to `.claude/agents/` and
 `rules/orchestration.md` to `.claude/rules/` in that repo.
 
@@ -54,22 +60,33 @@ your provider.
 
 ## What "read-only" means here
 
-`researcher` and `verifier` have no edit tools, but both keep Bash: a verifier
+`researcher` and `verifier` have no edit tools, but both keep a shell (Bash, or
+PowerShell where Windows has no Bash): a verifier
 has to run tests, and a researcher has to read git history. Their prompts forbid
 commands that change files, git state, dependencies, or anything remote.
 
 Part of that is enforced. The plugin ships a `PreToolUse` hook,
-`scripts/readonly_guard.py`, which inspects every Bash command from those two
-agents and denies the ones that change git state (`commit`, `add`, `reset`,
-`checkout`, `stash`, `merge`, `rebase`, `push`, `pull`, branch and tag writes,
-`config` writes, worktree and submodule changes, `clone`, `init`, and so on) or
-install and remove dependencies (npm, pnpm, yarn, bun, pip, uv, poetry, cargo,
-brew, apt, gem, `go get`). Read-only work is untouched: `git status`, `git log`,
-`git diff`, `git fetch`, `npm test`, `pytest`, `cargo test`, `uv run pytest`.
-The main conversation and the `executor` are never affected. The guard parses
-the command with `shlex`, so it follows `&&`, pipes, newlines, `$(...)`,
-wrappers like `sudo` and `xargs`, and absolute paths, and it does not fire on a
-mutating word inside a quoted string such as `git log --grep="reset"`.
+`scripts/readonly_guard.py`, which inspects every shell command from those two
+agents. For git it is an allow list: a subcommand runs only if the guard knows
+it to be read-only (`status`, `log`, `diff`, `show`, `blame`, `fetch`,
+`rev-parse`, `stash list`, `branch` and `tag` listings, `config` reads, and the
+like). Everything else is denied, including plumbing such as `update-index` and
+`symbolic-ref`, aliases, and any subcommand the guard has never heard of. For
+dependency managers it denies the install and remove verbs (npm, pnpm, yarn,
+bun, pip, uv, poetry, cargo, brew, apt, gem, `go get`) and leaves `npm test`,
+`pytest`, `cargo test`, `uv run pytest` alone. The main conversation and the
+`executor` are never affected. The guard parses Bash commands with `shlex`, so
+it follows `&&`, pipes, newlines, `$(...)`, wrappers like `sudo` and `xargs`,
+and absolute paths, and it does not fire on a mutating word inside a quoted
+string such as `git log --grep="reset"`. When it cannot be sure where a command
+starts (a wrapper option it does not know, or a command `shlex` cannot
+tokenise) it checks from every word onwards and errs towards denying.
+
+PowerShell commands get only that cruder word-by-word check, because the guard
+has no PowerShell parser: `git commit` is denied and `git status` runs, but a
+harmless `Select-String "git commit"` is denied too. On Windows the hook also needs a
+`python3` on `PATH`, which a stock Python install does not provide, and none of
+this is exercised by CI there, so treat the guard as best-effort on Windows.
 
 It stops there on purpose. Arbitrary file writes — `rm`, `sed -i`, a
 redirect, `python -c` — and network calls cannot be told apart from legitimate
@@ -89,7 +106,7 @@ hook to your own settings, pointing at the clone:
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",
@@ -106,7 +123,7 @@ hook to your own settings, pointing at the clone:
 `permissionMode: plan` is not an option here: Claude Code ignores that field for
 plugin agents, and whenever the main session runs in auto, `acceptEdits`, or
 `bypassPermissions` mode. For a harder guarantee than the guard gives, remove
-`Bash` from the agent.
+`Bash` and `PowerShell` from the agent.
 
 ## Tune it
 
@@ -116,7 +133,7 @@ plugin agents, and whenever the main session runs in auto, `acceptEdits`, or
   workers run at `high` even when the session runs lower. Drop the researcher
   to `medium` to cap cost; it will search less.
 - To keep MCP tools away from the researcher, replace its `disallowedTools`
-  line with `tools: Read, Grep, Glob, Bash, WebSearch, WebFetch`.
+  line with `tools: Read, Grep, Glob, Bash, PowerShell, WebSearch, WebFetch`.
 - The plugin sets no `version`, so installs track the latest commit.
 
 ## Evals
