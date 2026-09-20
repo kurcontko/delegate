@@ -1,21 +1,21 @@
-# Fable + Sonnet orchestration
+# fable-orchestrator
 
-When Fable runs the main conversation, work inline by default: quick or
-tightly coupled work stays in one context. Delegate self-contained work when
-separate context pays for itself — substantial implementation, parallel tracks,
-verbose evidence kept out of the main thread, or a fresh independent check.
-Keep agents on the model set in their definitions.
+This repo packages a delegation policy and three worker agents as a Claude Code
+plugin. The sources of truth are `rules/orchestration.md` (the policy) and
+`agents/` (the workers). To work here with the setup loaded, start Claude Code
+with `claude --plugin-dir .`; a plain `claude` session loads neither.
 
-Parallel editors must own disjoint files; resume the same worker for
-follow-ups. A task packet gives the outcome and why, relevant context and
-decisions, owned scope, and observable success checks.
-
-Make the smallest complete change; skip unrelated cleanup. Workers decide
-reversible local details within scope. Return unresolved cross-cutting or
-user-visible choices to Fable. Pause for the user only for an unapproved
-destructive, irreversible, or externally side-effecting action; a real scope
-or security change; or input only the user can provide.
-
-Assessment requests are read-only. Preserve changes you did not make. Treat
-worker reports as evidence: review resulting changes and integration, then
-ground completion claims in tool or test results. Return one integrated answer.
+- Keep the policy model-neutral and addressed to the main conversation. Rules
+  for workers belong in the agent bodies, because a plugin install delivers the
+  policy to the main conversation only.
+- Plugin agents ignore `permissionMode`, `hooks`, and `mcpServers`, and plugin
+  component directories are read without following symlinks, so rely on
+  neither.
+- After changing the plugin, run `claude plugin validate .`,
+  `python3 scripts/check_repo.py`, and `python3 -m unittest discover -s tests`;
+  CI runs the same three. The eval suite (`claude plugin eval .`) makes real
+  model calls, so ask before running it.
+- `scripts/readonly_guard.py` is the only enforcement in the plugin: it denies
+  git-state and dependency changes from `researcher` and `verifier`. Every
+  change to a deny or allow rule needs a test row in
+  `tests/test_readonly_guard.py`.
