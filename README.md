@@ -1,16 +1,16 @@
 # fable-orchestrator
 
-A delegation policy for Claude Code's main conversation, plus three Sonnet
-workers it can hand work to. The policy is not a pipeline: the main model works
+A delegation policy for Claude Code's main conversation, plus three workers
+it can hand work to: an Opus executor and verifier, and a Sonnet researcher. The policy is not a pipeline: the main model works
 inline by default and delegates only when a separate context pays for itself.
 It is written for a strong main model such as Fable, but nothing in it depends
 on which model runs the main conversation.
 
 | Agent | Does | Model, effort | Tools |
 | --- | --- | --- | --- |
-| `executor` | Implements one self-contained unit end to end inside assigned files | `sonnet`, high | Read, Grep, Glob, Bash, PowerShell, Edit, Write |
+| `executor` | Implements one self-contained unit end to end inside assigned files | `opus`, high | Read, Grep, Glob, Bash, PowerShell, Edit, Write |
 | `researcher` | Answers one high-volume research question with evidence | `sonnet`, high | Everything except Edit, Write, NotebookEdit, Agent (MCP tools included) |
-| `verifier` | Independently checks completed work; returns a verdict | `sonnet`, high | Read, Grep, Glob, Bash, PowerShell |
+| `verifier` | Independently checks completed work; returns a verdict | `opus`, high | Read, Grep, Glob, Bash, PowerShell |
 
 ## Install
 
@@ -53,10 +53,10 @@ Then start Claude Code with the main model you want, for example
 - While a worker runs, `/tasks` shows the model and effort it runs on.
 
 An agent's `model` field beats the `CLAUDE_CODE_SUBAGENT_MODEL` environment
-variable. The workers leave Sonnet only if you set
+variable. The workers leave their configured model only if you set
 `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`, or your organization's `availableModels`
-allowlist blocks it. `sonnet` is an alias, so it follows the current Sonnet for
-your provider.
+allowlist blocks it. `opus` and `sonnet` are aliases, so each follows the
+current model of that tier for your provider.
 
 ## What "read-only" means here
 
@@ -137,6 +137,10 @@ plugin agents, and whenever the main session runs in auto, `acceptEdits`, or
 - `effort` in an agent's frontmatter overrides the session's effort level, so
   workers run at `high` even when the session runs lower. Drop the researcher
   to `medium` to cap cost; it will search less.
+- The executor and verifier run on `opus`. To cap cost, lower their `effort`
+  to `medium` before switching `model` to `sonnet`: on long coding tasks a
+  stronger model at lower effort tends to cost less per finished task than a
+  weaker one at `high`.
 - To keep MCP tools away from the researcher, replace its `disallowedTools`
   line with `tools: Read, Grep, Glob, Bash, PowerShell, WebSearch, WebFetch`.
 - The plugin sets no `version`, so installs track the latest commit.

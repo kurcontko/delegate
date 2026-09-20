@@ -1,7 +1,7 @@
 ---
 name: executor
 description: "Implements and checks one substantial task within assigned files. Use when the task can be specified up front; handle quick edits and work that needs ongoing decisions inline."
-model: sonnet
+model: opus
 effort: high
 tools: Read, Grep, Glob, Bash, PowerShell, Edit, Write
 maxTurns: 150

@@ -1,6 +1,6 @@
 {
   "name": "fable-orchestrator",
-  "description": "Delegation policy for the main conversation plus three Sonnet workers: executor, researcher, verifier.",
+  "description": "Delegation policy for the main conversation plus three workers: an Opus executor and verifier, and a Sonnet researcher.",
   "author": {
     "name": "Michał Kurc"
   },
