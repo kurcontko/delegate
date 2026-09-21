@@ -23,7 +23,7 @@ Pick one. Both need Claude Code v2.1.251 or later; the evals need v2.1.269.
 `delegate:executor` and so on:
 
 ```
-/plugin marketplace add kurcontko/fable-orchestrator
+/plugin marketplace add kurcontko/delegate
 /plugin install delegate@delegate
 ```
 
@@ -32,9 +32,9 @@ to `~/.claude/rules/`, which Claude Code loads for every project without
 touching any `CLAUDE.md`:
 
 ```sh
-git clone https://github.com/kurcontko/fable-orchestrator
-./fable-orchestrator/install.sh              # re-run to update
-./fable-orchestrator/install.sh --uninstall
+git clone https://github.com/kurcontko/delegate
+./delegate/install.sh              # re-run to update
+./delegate/install.sh --uninstall
 ```
 
 The installer records what it wrote in `~/.claude/.delegate-manifest`.
@@ -119,7 +119,7 @@ hook to your own settings, pointing at the clone:
         "hooks": [
           {
             "type": "command",
-            "command": "python3 /path/to/fable-orchestrator/scripts/readonly_guard.py",
+            "command": "python3 /path/to/delegate/scripts/readonly_guard.py",
             "timeout": 5
           }
         ]
