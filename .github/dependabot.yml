@@ -1,0 +1,12 @@
+# The scripts use only the Python standard library, so the actions CI runs are
+# this repo's only third-party code. They are pinned to commit SHAs; this keeps
+# the pins current, as one grouped pull request a month.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
