@@ -637,8 +637,8 @@ class TestPowerShellTool(unittest.TestCase):
 class TestCallerScoping(GuardTestCase):
     def test_guarded_agent_forms(self):
         for agent_type in ["researcher", "verifier",
-                           "fable-orchestrator:researcher",
-                           "fable-orchestrator:verifier"]:
+                           "delegate:researcher",
+                           "delegate:verifier"]:
             with self.subTest(agent_type=agent_type):
                 self.assertDenied("git commit -m x", agent_type=agent_type)
                 self.assertAllowed("git status", agent_type=agent_type)
@@ -650,7 +650,7 @@ class TestCallerScoping(GuardTestCase):
                 self.assertAllowed(command, agent_type=None)
 
     def test_other_agents_pass(self):
-        for agent_type in ["executor", "fable-orchestrator:executor",
+        for agent_type in ["executor", "delegate:executor",
                            "general-purpose", "some-other-agent"]:
             with self.subTest(agent_type=agent_type):
                 self.assertAllowed("git commit -m x", agent_type=agent_type)
@@ -724,7 +724,7 @@ class TestRobustness(GuardTestCase):
 
 class TestReasonText(GuardTestCase):
     def test_reason_names_the_agent_and_the_alternative(self):
-        _, out, _ = run(bash("git commit -m x", "fable-orchestrator:verifier"))
+        _, out, _ = run(bash("git commit -m x", "delegate:verifier"))
         reason = json.loads(out)["hookSpecificOutput"]["permissionDecisionReason"]
         self.assertIn("verifier", reason)
         self.assertIn("read-only", reason)

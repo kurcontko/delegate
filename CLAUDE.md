@@ -1,4 +1,4 @@
-# fable-orchestrator
+# delegate
 
 This repo packages a delegation policy and three worker agents as a Claude Code
 plugin. The sources of truth are `rules/orchestration.md` (the policy) and

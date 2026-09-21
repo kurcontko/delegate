@@ -565,7 +565,7 @@ def main():
         if tool not in ("Bash", "PowerShell"):
             return
         agent_type = payload.get("agent_type") or ""
-        # Plugin agents arrive as `fable-orchestrator:verifier`.
+        # Plugin agents arrive as `delegate:verifier`.
         agent = str(agent_type).rsplit(":", 1)[-1]
         if agent not in GUARDED_AGENTS:
             return

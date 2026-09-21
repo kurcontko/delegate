@@ -1,4 +1,4 @@
-# CI for fable-orchestrator.
+# CI for delegate.
 #
 # Everything here is free, deterministic and offline-ish: no secrets, no
 # authentication, no model calls. In particular this workflow never runs

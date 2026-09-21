@@ -13,7 +13,8 @@ import unittest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(REPO, "install.sh")
-MANIFEST = ".fable-orchestrator-manifest"
+MANIFEST = ".delegate-manifest"
+LEGACY_MANIFEST = ".fable-orchestrator-manifest"
 FILES = [
     "agents/executor.md",
     "agents/researcher.md",
@@ -143,6 +144,48 @@ class InstallTestCase(unittest.TestCase):
             handle.write("%s %s victim.md\n" % (crc, size))
         self.assertEqual(self.install("--uninstall")[0], 0)
         self.assertEqual(self.read("victim.md"), "v\n")
+
+    def as_legacy_install(self):
+        """Install, then record it the way the fable-orchestrator installer did."""
+        self.assertEqual(self.install()[0], 0)
+        os.rename(self.path(MANIFEST), self.path(LEGACY_MANIFEST))
+
+    def test_legacy_install_updates_and_moves_to_the_new_manifest(self):
+        self.as_legacy_install()
+        self.write("agents/verifier.md", "older version\n")
+        crc, size = subprocess.check_output(
+            ["cksum", self.path("agents/verifier.md")]).decode().split()[:2]
+        lines = [line for line in self.read(LEGACY_MANIFEST).splitlines()
+                 if not line.endswith(" agents/verifier.md")]
+        lines.append("%s %s agents/verifier.md" % (crc, size))
+        self.write(LEGACY_MANIFEST, "\n".join(lines) + "\n")
+
+        self.assertEqual(self.install()[0], 0)
+        self.assertEqual(self.read("agents/verifier.md"),
+                         self.repo_text("agents/verifier.md"))
+        self.assertTrue(os.path.exists(self.path(MANIFEST)))
+        self.assertFalse(os.path.exists(self.path(LEGACY_MANIFEST)))
+
+    def test_legacy_install_still_protects_a_local_edit(self):
+        self.as_legacy_install()
+        self.write("agents/verifier.md", "my tweak\n")
+        code, err = self.install()
+        self.assertEqual(code, 1)
+        self.assertIn("agents/verifier.md", err)
+        self.assertEqual(self.read("agents/verifier.md"), "my tweak\n")
+        self.assertTrue(os.path.exists(self.path(LEGACY_MANIFEST)))
+        self.assertFalse(os.path.exists(self.path(MANIFEST)))
+
+    def test_legacy_install_uninstalls(self):
+        self.write("agents/unrelated.md", "keep me\n")
+        self.as_legacy_install()
+        self.write("agents/verifier.md", "my tweak\n")
+        self.assertEqual(self.install("--uninstall")[0], 0)
+        for rel in ["agents/executor.md", "agents/researcher.md",
+                    "rules/orchestration.md", MANIFEST, LEGACY_MANIFEST]:
+            self.assertFalse(os.path.exists(self.path(rel)), rel)
+        self.assertEqual(self.read("agents/verifier.md"), "my tweak\n")
+        self.assertEqual(self.read("agents/unrelated.md"), "keep me\n")
 
     def test_unknown_option(self):
         self.assertEqual(self.install("--bogus")[0], 2)
