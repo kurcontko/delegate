@@ -11,7 +11,11 @@ set -eu
 
 src=$(cd "$(dirname "$0")" && pwd)
 dest=${CLAUDE_CONFIG_DIR:-$HOME/.claude}
-manifest="$dest/.fable-orchestrator-manifest"
+manifest="$dest/.delegate-manifest"
+# Installs made under the old name, fable-orchestrator, recorded their files
+# here. It is read when there is no manifest yet, so those installs still update
+# and uninstall, and it is removed once it has been replaced or acted on.
+legacy="$dest/.fable-orchestrator-manifest"
 files="agents/executor.md agents/researcher.md agents/verifier.md rules/orchestration.md"
 
 mode=install
@@ -34,33 +38,38 @@ sum() {
 
 # The checksum the manifest holds for a path, or nothing.
 recorded() {
-  [ -f "$manifest" ] || return 0
-  awk -v path="$1" '$3 == path {print $1, $2}' "$manifest"
+  known="$manifest"
+  [ -f "$known" ] || known="$legacy"
+  [ -f "$known" ] || return 0
+  awk -v path="$1" '$3 == path {print $1, $2}' "$known"
 }
 
 if [ "$mode" = uninstall ]; then
-  if [ ! -f "$manifest" ]; then
-    echo "No fable-orchestrator install is recorded in $dest; nothing removed."
+  if [ ! -f "$manifest" ] && [ ! -f "$legacy" ]; then
+    echo "No delegate install is recorded in $dest; nothing removed."
     exit 0
   fi
-  while read -r crc size path; do
-    case "$path" in
-      *..*) continue ;;
-      agents/*.md | rules/*.md) ;;
-      *) continue ;;
-    esac
-    target="$dest/$path"
-    if [ ! -f "$target" ] || [ -L "$target" ]; then
-      continue
-    fi
-    if [ "$(sum "$target")" = "$crc $size" ]; then
-      rm -f "$target"
-    else
-      echo "Kept $target: it changed after it was installed." >&2
-    fi
-  done <"$manifest"
-  rm -f "$manifest"
-  echo "Removed fable-orchestrator files from $dest"
+  for known in "$manifest" "$legacy"; do
+    [ -f "$known" ] || continue
+    while read -r crc size path; do
+      case "$path" in
+        *..*) continue ;;
+        agents/*.md | rules/*.md) ;;
+        *) continue ;;
+      esac
+      target="$dest/$path"
+      if [ ! -f "$target" ] || [ -L "$target" ]; then
+        continue
+      fi
+      if [ "$(sum "$target")" = "$crc $size" ]; then
+        rm -f "$target"
+      else
+        echo "Kept $target: it changed after it was installed." >&2
+      fi
+    done <"$known"
+    rm -f "$known"
+  done
+  echo "Removed delegate files from $dest"
   exit 0
 fi
 
@@ -97,4 +106,5 @@ for f in $files; do
   echo "$(sum "$dest/$f") $f" >>"$tmp"
 done
 mv "$tmp" "$manifest"
+rm -f "$legacy"
 echo "Installed to $dest. Start a new Claude Code session to load them."

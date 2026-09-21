@@ -1,10 +1,12 @@
-# fable-orchestrator
+# delegate
 
 A delegation policy for Claude Code's main conversation, plus three workers
 it can hand work to: an Opus executor and verifier, and a Sonnet researcher. The policy is not a pipeline: the main model works
 inline by default and delegates only when a separate context pays for itself.
 It is written for a strong main model such as Fable, but nothing in it depends
 on which model runs the main conversation.
+The workers are Claude Code subagents; this is not a bridge to another vendor's
+CLI.
 
 | Agent | Does | Model, effort | Tools |
 | --- | --- | --- | --- |
@@ -18,11 +20,11 @@ Pick one. Both need Claude Code v2.1.251 or later; the evals need v2.1.269.
 
 **As a plugin.** The policy reaches the main conversation through a
 `SessionStart` hook, and the agents are namespaced as
-`fable-orchestrator:executor` and so on:
+`delegate:executor` and so on:
 
 ```
 /plugin marketplace add kurcontko/fable-orchestrator
-/plugin install fable-orchestrator@fable-orchestrator
+/plugin install delegate@delegate
 ```
 
 **As plain files.** This copies the agents to `~/.claude/agents/` and the policy
@@ -35,7 +37,9 @@ git clone https://github.com/kurcontko/fable-orchestrator
 ./fable-orchestrator/install.sh --uninstall
 ```
 
-The installer records what it wrote in `~/.claude/.fable-orchestrator-manifest`.
+The installer records what it wrote in `~/.claude/.delegate-manifest`.
+An install made under the old name, fable-orchestrator, is recognised from its
+`.fable-orchestrator-manifest` and moved over on the next run.
 It refuses to replace a file it did not write, such as a `researcher.md` of your
 own, or one you edited after installing; `--force` replaces them anyway.
 `--uninstall` removes only files that still match the manifest and leaves the

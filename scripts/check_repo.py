@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Structural checks for the fable-orchestrator plugin.
+"""Structural checks for the delegate plugin.
 
 Catches the ways this repo actually breaks for someone who copies it: a
 manifest that disagrees with itself, an agent file Claude Code silently

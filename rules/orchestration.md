@@ -25,7 +25,7 @@ Most tasks need no agents. Multi-part features usually need one to three;
 more than four at once rarely helps.
 
 Use each agent's configured model and effort. Do not pass a model override
-when spawning. Plugin agent names are `fable-orchestrator:executor` and so on.
+when spawning. Plugin agent names are `delegate:executor` and so on.
 
 ## Task packets
 
