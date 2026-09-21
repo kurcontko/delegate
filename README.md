@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/delegate-400.png" alt="delegate logo" width="160">
+<img src="assets/delegate-transparent.png" alt="delegate logo" width="160">
 
 # delegate
 
