@@ -1,12 +1,44 @@
+<div align="center">
+
+<img src="assets/delegate-400.png" alt="delegate logo" width="160">
+
 # delegate
 
-A delegation policy for Claude Code's main conversation, plus three workers
-it can hand work to: an Opus executor and verifier, and a Sonnet researcher. The policy is not a pipeline: the main model works
-inline by default and delegates only when a separate context pays for itself.
-It is written for a strong main model such as Fable, but nothing in it depends
-on which model runs the main conversation.
-The workers are Claude Code subagents; this is not a bridge to another vendor's
+**Work inline. Delegate when a separate context pays for itself.**
+
+A delegation policy for Claude Code's main conversation, plus three workers it can hand work to.
+
+[![CI](https://github.com/kurcontko/delegate/actions/workflows/ci.yml/badge.svg)](https://github.com/kurcontko/delegate/actions/workflows/ci.yml)
+[![License](https://img.shields.io/github/license/kurcontko/delegate)](LICENSE)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-%E2%89%A5%202.1.251-blue)](https://code.claude.com/docs/en/plugins)
+[![Plugin](https://img.shields.io/badge/install-delegate%40delegate-555)](#install)
+
+[Install](#install) · [Check that it works](#check-that-it-works) · [Read-only guard](#what-read-only-means-here) · [Tune it](#tune-it) · [Evals](#evals)
+
+</div>
+
+The policy is not a pipeline: the main model works inline by default and
+delegates only when a separate context pays for itself. It is written for a
+strong main model such as Fable, but nothing in it depends on which model runs
+the main conversation. The workers are Claude Code subagents: an Opus executor
+and verifier, and a Sonnet researcher. This is not a bridge to another vendor's
 CLI.
+
+```mermaid
+flowchart LR
+    U([Request]) --> M{Main conversation}
+    M -->|"quick, conversational, or<br>slower to specify than to do"| I[Work inline]
+    M -->|"substantial work,<br>fully specified up front"| E["executor<br>opus · edits assigned files"]
+    M -->|"many files, logs<br>or web pages to read"| R["researcher<br>sonnet · read-only"]
+    M -->|"large, risky, or<br>untested finished work"| V["verifier<br>opus · read-only"]
+    G[["readonly_guard.py<br>denies git-state and dependency changes"]] -.-> R
+    G -.-> V
+```
+
+Most tasks need no agents. Multi-part features usually need one to three; more
+than four at once rarely helps.
+
+## The workers
 
 | Agent | Does | Model, effort | Tools |
 | --- | --- | --- | --- |
