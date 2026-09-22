@@ -20,11 +20,13 @@ agents. Please report:
 
 These are documented limits, not vulnerabilities (see
 [docs/readonly-guard.md](docs/readonly-guard.md)): the guard does not stop
-arbitrary file writes such as `rm` or a redirect, or network calls; it fails
-open when `python3` is missing; it is best-effort on Windows and for
-PowerShell; and a plain-file install has no guard unless you add the hook
-yourself. An agent ignoring an instruction in its prompt is a bug worth a
-public issue, not a security report.
+arbitrary file writes such as `rm` or a redirect, network calls, interpreters
+such as `python -c`, scripts and build tools such as `bash script.sh`,
+`source` or `make`, or a hostile repository's own `.git/config`; it fails open
+when `python3` is missing; it is best-effort on Windows and for PowerShell; and
+a plain-file install has no guard unless you add the hook yourself. An agent
+ignoring an instruction in its prompt is a bug worth a public issue, not a
+security report.
 
 ## Reporting
 

@@ -1,0 +1,226 @@
+# One command per record, records separated by a line holding only `@@`.
+# Written from the other side of the table: not "does the guard match its
+# spec?" but "what would you type to get past it?". Add a record here
+# before adding the rule that handles it.
+eval "git commit -m x"
+@@
+eval 'git push'
+@@
+builtin eval "git commit"
+@@
+eval "$CMD"
+@@
+echo "git commit -m x" | bash
+@@
+bash <<< "git commit -m x"
+@@
+curl -s x | sh
+@@
+bash -s
+@@
+bash -
+@@
+sh
+@@
+bash -ec "git commit -m x"
+@@
+bash -xc 'git push'
+@@
+bash -o pipefail -c "git push"
+@@
+g=git; $g commit -m x
+@@
+$(echo git) commit -m x
+@@
+`which git` commit
+@@
+$VENV/bin/$TOOL x
+@@
+alias gc="git commit"; gc
+@@
+hash -p /tmp/evil git; git status
+@@
+enable -f ./x.so git
+@@
+find . -name x -exec git add {} +
+@@
+find . -execdir git rm {} \;
+@@
+find . -ok git commit \;
+@@
+gh pr merge 1
+@@
+gh pr create -t x
+@@
+gh repo delete x
+@@
+gh release create v1
+@@
+gh api -X POST repos/x/issues
+@@
+gh api repos/x/issues -f title=x
+@@
+gh api --method=DELETE repos/x
+@@
+gh api --input body.json repos/x
+@@
+gh -R o/r pr merge 1
+@@
+gh issue close 1
+@@
+gh auth setup-git
+@@
+gh run cancel 1
+@@
+gh workflow run ci.yml
+@@
+hub commit -m x
+@@
+hub pull-request
+@@
+hub push
+@@
+for i in 1; do git commit -m x; done
+@@
+if true; then git commit -m x; fi
+@@
+while true; do git push; done
+@@
+coproc git commit
+@@
+trap 'git commit' EXIT
+@@
+git -c core.pager='sh -c "git commit"' log
+@@
+git -c alias.st='!git commit -m x' st
+@@
+git --exec-path=/tmp/evil status
+@@
+git -c core.fsmonitor=/tmp/evil status
+@@
+git -c credential.helper=/tmp/evil ls-remote origin
+@@
+git -c core.sshCommand=/tmp/evil ls-remote origin
+@@
+git -c diff.external=/tmp/evil diff
+@@
+git -c gpg.program=/tmp/evil log --show-signature
+@@
+git --config-env=core.pager=X log
+@@
+git --mystery status
+@@
+git grep -O'sh -c x' foo
+@@
+git grep --open-files-in-pager=vim x
+@@
+git diff --ext-diff
+@@
+GIT_PAGER='sh -c "git commit"' git log
+@@
+PATH=/tmp/evil:$PATH git status
+@@
+GIT_EXEC_PATH=/tmp/evil git status
+@@
+GIT_SSH_COMMAND=/tmp/evil git ls-remote
+@@
+GIT_CONFIG_GLOBAL=/tmp/x git status
+@@
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.pager GIT_CONFIG_VALUE_0=x git log
+@@
+LD_PRELOAD=/tmp/x.so git status
+@@
+HOME=/tmp/evil git status
+@@
+BASH_ENV=/tmp/evil bash -c "git status"
+@@
+export PATH=/tmp/evil:$PATH; git status
+@@
+export GIT_EXEC_PATH=/tmp/e
+@@
+env PATH=/tmp/evil git status
+@@
+sudo PATH=/x git status
+@@
+declare -x GIT_SSH=/x
+@@
+su -c "git commit"
+@@
+su root
+@@
+su --command="git push"
+@@
+watch git commit
+@@
+watch -n 5 git push
+@@
+parallel git commit ::: a
+@@
+ssh host git push
+@@
+ssh -p 22 host "git commit"
+@@
+pipx install x
+@@
+conda install x
+@@
+mamba install x
+@@
+pdm add x
+@@
+rye add x
+@@
+composer require x
+@@
+pip3.11 install x
+@@
+python3.12 -m pip install x
+@@
+py -m pip install x
+@@
+# note
+git commit -m x
+@@
+git status # ok
+git push
+@@
+git-commit -m x
+@@
+git-push origin main
+@@
+/usr/lib/git-core/git-push origin
+@@
+git-lfs pull
+@@
+git-flow feature start x
+@@
+git\
+ commit -m x
+@@
+env --split-string='git commit -m x'
+@@
+env -S 'git push'
+@@
+script -c 'git commit' /dev/null
+@@
+flock /tmp/l git commit
+@@
+flock -c 'git push' /tmp/l
+@@
+ionice -c3 git commit
+@@
+tmux new-session -d 'git commit'
+@@
+screen -dm git commit
+@@
+chroot / git commit
+@@
+unshare -r git commit
+@@
+{git,true} commit
+@@
+echo 'git commit' | at now
+@@
+batch
+@@
+crontab -e
