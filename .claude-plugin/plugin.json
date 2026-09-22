@@ -1,5 +1,6 @@
 {
   "name": "delegate",
+  "version": "1.0.0",
   "description": "Delegation policy for the main conversation plus three workers: an Opus executor and verifier, and a Sonnet researcher.",
   "author": {
     "name": "Michał Kurc"

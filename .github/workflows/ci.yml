@@ -65,11 +65,10 @@ jobs:
       # ground -- manifest parsing, name agreement, hook targets, agent
       # frontmatter -- so drop this step rather than adding a secret.
       #
-      # No --strict: validation passes with one expected warning, because the
-      # plugin deliberately sets no `version` so installs track the latest
-      # commit.
+      # --strict turns warnings into errors, which is the bar the community
+      # marketplace's review pipeline applies.
       - name: Validate plugin manifests
-        run: claude plugin validate .
+        run: claude plugin validate --strict .
 
   unit-tests:
     name: Unit tests (${{ matrix.os }}, Python ${{ matrix.python-version }})

@@ -2,8 +2,8 @@
 
 ## Supported versions
 
-The plugin sets no `version`, so installs track the latest commit on `main`.
-Only that commit is supported; fixes are not backported.
+Only the latest release, the `version` in `plugin.json` on `main`, is
+supported; fixes are not backported.
 
 ## What counts as a vulnerability
 
