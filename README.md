@@ -80,14 +80,20 @@ verifier has to run tests and a researcher has to read git history. A
 those two agents:
 
 - **Git is an allow list.** Read-only subcommands (`status`, `log`, `diff`,
-  `show`, `blame`, …) run; everything else, including `fetch` and anything the
-  guard has never heard of, is denied.
+  `show`, `blame`, …) run; everything else, including `fetch`, `-c` settings
+  that make git run a program, and anything the guard has never heard of, is
+  denied. `gh` gets the same treatment: listing and viewing only.
 - **Dependency changes are denied** (`npm install`, `pip install`,
   `cargo add`, `go get`, …), also through `uv run`, `npx` and the like. Test
   runners are left alone.
-- **It is not a sandbox.** File writes such as `rm` or a redirect, and network
-  calls, cannot be told apart from legitimate work by reading a command line, so
-  for those the rule remains an instruction.
+- **Indirection is followed or denied.** `bash -c`, `eval`, `find -exec`,
+  `xargs`, `sudo` and shell keywords are looked through; a shell fed from
+  stdin, a command name that is a variable, and `PATH`- or `GIT_*`-style
+  variables that redirect execution are denied.
+- **It is not a sandbox.** File writes, interpreters (`python -c`), scripts,
+  build tools and a hostile repository config cannot be told apart from
+  legitimate work by reading a command line, so for those the rule remains an
+  instruction.
 - **It fails open** if `python3` is missing, and is best-effort on Windows.
 
 The main conversation and the `executor` are never affected. Details, limits,

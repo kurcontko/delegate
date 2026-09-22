@@ -14,10 +14,14 @@ commands are parsed as POSIX shell; PowerShell commands, and Bash commands that
 cannot be parsed, get a cruder scan that treats every word as a possible command
 start and so errs towards denying.
 
-Scope is deliberately narrow: git state and dependency managers only. Arbitrary
-file writes (`rm`, `sed -i`, redirects, `python -c ...`) and network mutations
-cannot be recognised from a command line with any confidence, so they stay an
-instruction to the agent rather than a mechanical block.
+Scope is deliberately narrow: git state and dependency managers only, plus the
+shell features that would otherwise hide a git command from this file (`eval`,
+a shell fed from stdin, an expansion in command position, `find -exec`, env
+variables and `git -c` settings that make git run something). Arbitrary file
+writes (`rm`, `sed -i`, redirects), interpreters (`python -c ...`), build
+tools, scripts and network mutations cannot be recognised from a command line
+with any confidence, so they stay an instruction to the agent rather than a
+mechanical block.
 
 Python 3.8+, standard library only. Any unexpected error here fails open.
 """
@@ -66,20 +70,84 @@ WRAPPERS = {
               {"-a", "-d", "-E", "-I", "-J", "-L", "-n", "-P", "-R", "-S", "-s",
                "--arg-file", "--delimiter", "--max-lines", "--max-args",
                "--max-procs", "--max-chars", "--process-slot-var"}),
+    "watch": ({"-b", "-c", "-d", "-e", "-g", "-p", "-t", "-x", "--beep",
+               "--color", "--differences", "--errexit", "--chgexit",
+               "--precise", "--no-title", "--exec"},
+              {"-n", "--interval"}),
+    # No options are modelled: any option sends the rest to the position scan.
+    "parallel": (set(), set()),
 }
+
+# Commands whose arguments are scanned from every position, because the real
+# command starts somewhere after a host name or an option the guard does not
+# model.
+SCAN_ALL = {"ssh"}
+
+# Shell reserved words that may start a segment without being a command.
+# `for`, `case` and `select` head a clause whose words are data, so that
+# segment is skipped; the others are dropped and what follows is checked.
+KEYWORDS_DROP = {"if", "then", "else", "elif", "while", "until", "do", "coproc"}
+KEYWORDS_SKIP = {"for", "case", "select", "function", "in"}
+
+# `find` actions that run a command on each match.
+FIND_EXEC = {"-exec", "-execdir", "-ok", "-okdir"}
+
+# Environment variables that change what git or the shell runs. Setting them
+# on the command line is denied outright; the pager variables are allowed only
+# with a harmless value.
+ENV_DENY = {
+    "PATH", "HOME", "XDG_CONFIG_HOME", "BASH_ENV", "ENV", "ZDOTDIR",
+    "GIT_EXEC_PATH", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_EXTERNAL_DIFF",
+    "GIT_PROXY_COMMAND", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR", "GIT_ASKPASS",
+    "SSH_ASKPASS", "GIT_TEMPLATE_DIR",
+}
+ENV_DENY_PREFIXES = ("GIT_CONFIG_", "LD_", "DYLD_")
+PAGER_ENV = {"GIT_PAGER", "PAGER"}
+PAGER_OK = {"", "cat", "false", "0", "no", "off"}
 
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
 POWERSHELLS = {"pwsh", "powershell"}
+# Shell long options that consume the next token.
+SHELL_LONG_WITH_VALUE = {"--rcfile", "--init-file"}
 
 # Tokens made only of shell punctuation separate one command from the next.
 # `{`, `}` and `!` are only ever their own token when the shell treats them as
 # grouping or negation, so they belong here too.
 SEPARATOR_CHARS = set(";&|()<>{}!\n")
 
-# git global options that consume the following token.
+# git global options. Like subcommands they are an allow list: an option
+# missing from both sets is denied. `--exec-path=DIR` and `--config-env` are
+# absent on purpose, because they point git at another binary directory or at
+# configuration the guard cannot see. Bare `--exec-path` only prints the path.
+GIT_GLOBAL_FLAGS = {
+    "-p", "--paginate", "-P", "--no-pager", "--bare", "--no-replace-objects",
+    "--literal-pathspecs", "--glob-pathspecs", "--noglob-pathspecs",
+    "--icase-pathspecs", "--no-optional-locks", "--no-lazy-fetch",
+    "--no-advice", "--version", "--help", "-h", "--html-path", "--man-path",
+    "--info-path", "--exec-path",
+}
+# Options that consume the following token.
 GIT_OPTS_WITH_VALUE = {
-    "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--exec-path",
-    "--config-env", "--super-prefix", "--attr-source",
+    "-C", "-c", "--git-dir", "--work-tree", "--namespace", "--super-prefix",
+    "--attr-source",
+}
+
+# `git -c key=value` settings known not to make git run anything. Read-only
+# commands need few of these; anything else is denied. Pager settings pass
+# only with a value from `PAGER_OK`.
+GIT_CONFIG_SECTIONS = {
+    "color", "column", "advice", "i18n", "versionsort", "tag", "branch",
+    "log", "format", "status", "grep", "blame", "safe", "user", "commit",
+    "pretty", "diff",
+}
+# Last key components that name a command to run, in any section.
+GIT_CONFIG_RUNS = {"external", "command", "textconv", "cmd", "tool", "guitool",
+                   "program", "helper"}
+GIT_CORE_HARMLESS = {
+    "quotepath", "abbrev", "ignorecase", "precomposeunicode", "whitespace",
+    "longpaths", "filemode", "eol", "autocrlf", "safecrlf", "untrackedcache",
+    "fscache", "commentchar", "bigfilethreshold", "compression",
+    "packedgitlimit", "deltabasecachelimit", "symlinks",
 }
 
 # git subcommands that never change the working tree, the index, local refs or
@@ -128,6 +196,42 @@ GIT_SUB_ALLOW = {
     "notes": {None, "list", "show"},
     "lfs": {"ls-files", "status", "env"},
 }
+# `gh` is an allow list like git: group -> read-only verbs, `None` for the
+# bare group (which prints help). `search` verbs all read. `api` is handled
+# in `check_gh`. `hub` is a git wrapper and goes through `check_git`.
+GH_ALLOW = {
+    "auth": {None, "status", "token"},
+    "browse": {None},
+    "cache": {None, "list"},
+    "codespace": {None, "list", "view"},
+    "config": {None, "get", "list"},
+    "extension": {None, "list"},
+    "gist": {None, "list", "view"},
+    "gpg-key": {None, "list"},
+    "ssh-key": {None, "list"},
+    "issue": {None, "list", "view", "status"},
+    "label": {None, "list"},
+    "org": {None, "list"},
+    "pr": {None, "list", "view", "checks", "diff", "status"},
+    "project": {None, "list", "view", "field-list", "item-list"},
+    "release": {None, "list", "view", "download"},
+    "repo": {None, "view", "list"},
+    "ruleset": {None, "list", "view", "check"},
+    "run": {None, "list", "view", "watch", "download"},
+    "secret": {None, "list"},
+    "variable": {None, "list"},
+    "workflow": {None, "list", "view"},
+    "attestation": {None, "verify"},
+    "alias": {None, "list"},
+    "status": {None},
+    "version": {None},
+    "help": {None},
+    "completion": {None},
+}
+GH_GLOBAL_WITH_VALUE = {"-R", "--repo"}
+GH_API_METHOD = {"-X", "--method"}
+GH_API_FIELDS = {"-f", "-F", "--field", "--raw-field", "--input"}
+
 # Dependency managers: first non-flag word -> denied verbs.
 PKG_DENY = {
     "npm": {"install", "i", "add", "remove", "uninstall", "rm", "un", "ci",
@@ -148,7 +252,18 @@ PKG_DENY = {
     "gem": {"install", "uninstall", "update"},
     "go": {"get", "install"},
     "uv": {"add", "remove", "sync", "lock"},
+    "pipx": {"install", "uninstall", "upgrade", "upgrade-all", "inject",
+             "uninject", "reinstall", "reinstall-all"},
+    "conda": {"install", "uninstall", "remove", "update", "upgrade", "create"},
+    "mamba": {"install", "uninstall", "remove", "update", "upgrade", "create"},
+    "micromamba": {"install", "uninstall", "remove", "update", "upgrade",
+                   "create"},
+    "pdm": {"add", "remove", "install", "update", "sync", "lock"},
+    "rye": {"add", "remove", "sync", "lock"},
+    "composer": {"install", "require", "remove", "update", "upgrade"},
 }
+# `pip3.11`, `python3.12`: versioned names normalise to the plain manager.
+VERSIONED = re.compile(r"^(pip|python|py)[0-9.]*$")
 
 # Two-word forms: manager -> first word -> second words that change dependencies.
 PKG_DENY_PAIRS = {
@@ -329,18 +444,36 @@ def lists_only(rest, flags, letters):
     return listing or not positional
 
 
+def check_env(token):
+    """The reason a `NAME=value` assignment is denied, or None.
+
+    Only variables that change what git or the shell executes are denied; the
+    value of every other variable is data.
+    """
+    name, _, value = token.partition("=")
+    if name in ENV_DENY or name.startswith(ENV_DENY_PREFIXES):
+        return "`%s=` changes what git or the shell runs" % name
+    if name in PAGER_ENV and value.strip().lower() not in PAGER_OK:
+        return "`%s=%s` makes git run a pager of its own" % (name, value)
+    return None
+
+
 def strip_wrappers(argv):
     """Drop leading env assignments and wrappers such as `sudo` or `xargs`.
 
-    Returns `(rest, recognised)`. `recognised` is False when a wrapper carried
-    an option that `WRAPPERS` does not list: the option may or may not consume
-    the next token, so where the wrapped command starts is a guess, and `rest`
-    is simply everything after that option.
+    Returns `(rest, recognised, reason)`. `recognised` is False when a wrapper
+    carried an option that `WRAPPERS` does not list: the option may or may not
+    consume the next token, so where the wrapped command starts is a guess, and
+    `rest` is simply everything after that option. `reason` is set when an env
+    assignment is one `check_env` denies.
     """
     i = 0
     while i < len(argv):
         token = argv[i]
         if ENV_ASSIGN.match(token):
+            reason = check_env(token)
+            if reason:
+                return argv[i:], True, reason
             i += 1
             continue
         name = base(token)
@@ -351,6 +484,9 @@ def strip_wrappers(argv):
         while i < len(argv):
             arg = argv[i]
             if ENV_ASSIGN.match(arg):
+                reason = check_env(arg)
+                if reason:
+                    return argv[i:], True, reason
                 i += 1
                 continue
             if not arg.startswith("-") or arg == "-":
@@ -368,27 +504,115 @@ def strip_wrappers(argv):
                 continue
             if not is_long and arg[:2] in value_flags:
                 continue  # attached value: `-n1`, `-I{}`, `-oL`
-            return argv[i:], False
+            return argv[i:], False, None
         if name == "timeout":
             i += 1  # the duration
-    return argv[i:], True
+    return argv[i:], True, None
 
 
-def check_git(args):
+def check_shell(name, args, depth):
+    """A shell invocation: check the `-c` string, or deny a shell fed by stdin.
+
+    `-c` may be bundled (`bash -ec "..."`). With no `-c` and no script
+    operand the shell reads its commands from stdin, a here-string or a pipe,
+    none of which the guard can see, so that form is denied. A script file is
+    a documented limit and passes.
+    """
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--":
+            return None if i + 1 < len(args) else stdin_reason(name)
+        if arg.startswith("--"):
+            i += 2 if arg in SHELL_LONG_WITH_VALUE else 1
+            continue
+        if arg[:1] in "-+" and len(arg) > 1:
+            letters = arg[1:]
+            if "c" in letters:
+                if i + 1 < len(args):
+                    return check_command(args[i + 1], depth + 1)
+                return None
+            if "s" in letters:
+                return stdin_reason(name)
+            i += 2 if letters[-1] in "oO" else 1
+            continue
+        if arg == "-":
+            return stdin_reason(name)
+        return None  # a script file
+    return stdin_reason(name)
+
+
+def stdin_reason(name):
+    return ("`%s` with no `-c` reads its commands from stdin, which this guard "
+            "cannot see" % name)
+
+
+def check_su(args, depth):
+    for i, arg in enumerate(args):
+        if arg == "-c" and i + 1 < len(args):
+            return check_command(args[i + 1], depth + 1)
+        if arg.startswith("--command="):
+            return check_command(arg.split("=", 1)[1], depth + 1)
+    return "`su` without `-c` starts a shell this guard cannot see"
+
+
+def check_git_config(setting):
+    """The reason a `git -c key[=value]` setting is denied, or None."""
+    key, _, value = setting.partition("=")
+    parts = key.lower().split(".")
+    section, last = parts[0], parts[-1]
+    if last in GIT_CONFIG_RUNS:
+        pass
+    elif section == "pager" or (section == "core" and last == "pager"):
+        if value.strip().lower() in PAGER_OK:
+            return None
+    elif section == "core" and last in GIT_CORE_HARMLESS:
+        return None
+    elif section in GIT_CONFIG_SECTIONS:
+        return None
+    return "`git -c %s` is not a setting this guard knows to be harmless" % key
+
+
+def check_git(args, name="git"):
     i = 0
     while i < len(args):
         token = args[i]
         if not token.startswith("-"):
             break
         i += 1
-        if token in GIT_OPTS_WITH_VALUE and i < len(args):
-            i += 1
+        opt, has_value, value = token.partition("=")
+        if opt in GIT_OPTS_WITH_VALUE:
+            if not has_value:
+                value = args[i] if i < len(args) else ""
+                i += 1
+        elif token.startswith("-c") and not token.startswith("--"):
+            opt, value = "-c", token[2:]  # attached: `-ccore.pager=cat`
+        elif token in GIT_GLOBAL_FLAGS or token.startswith("--list-cmds"):
+            continue
+        else:
+            return ("`%s %s` is not a global option this guard knows to be "
+                    "harmless" % (name, opt))
+        if opt == "-c":
+            reason = check_git_config(value)
+            if reason:
+                return reason
     if i >= len(args):
         return None
     sub = args[i].lower()
     rest = args[i + 1:]
 
+    if sub == "grep":
+        for arg in rest:
+            if arg == "--":
+                break
+            short = arg.startswith("-") and not arg.startswith("--")
+            if (short and "O" in arg) or arg.startswith("--open-files-in-pager"):
+                return "`git grep -O` runs a pager on the results"
+        return None
+
     if sub in GIT_READ_ONLY:
+        if "--ext-diff" in rest:
+            return "`git %s --ext-diff` runs an external diff program" % sub
         return None
 
     if sub == "fetch":
@@ -427,7 +651,53 @@ def check_git(args):
                           ", ".join(sorted(v for v in allowed if v))))
 
     # The allow list is the contract: unknown means denied.
-    return "`git %s` is not a git command this guard knows to be read-only" % sub
+    return ("`%s %s` is not a git command this guard knows to be read-only"
+            % (name, sub))
+
+
+def check_gh(args):
+    """`gh` is an allow list of read-only verbs; `gh api` may only GET."""
+    words = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        opt = arg.split("=", 1)[0]
+        if opt in GH_GLOBAL_WITH_VALUE:
+            i += 1 if "=" in arg else 2
+            continue
+        words.append(arg)
+        i += 1
+    group = first_word(words)
+    if group is None:
+        return None
+    rest = words[[w.lower() for w in words].index(group) + 1:]
+    if group == "search":
+        return None
+    if group == "api":
+        method = None
+        fields = False
+        for j, arg in enumerate(rest):
+            opt = arg.split("=", 1)[0]
+            if opt in GH_API_METHOD:
+                method = (arg.split("=", 1)[1] if "=" in arg
+                          else rest[j + 1] if j + 1 < len(rest) else "")
+            elif opt == "--input":
+                return "`gh api --input` sends a request body"
+            elif opt in GH_API_FIELDS:
+                fields = True
+        if method is not None and method.upper() not in ("GET", "HEAD"):
+            return "`gh api -X %s` changes state on GitHub" % method
+        if fields and method is None:
+            return "`gh api` with fields defaults to a POST request"
+        return None
+    allowed = GH_ALLOW.get(group)
+    if allowed is None:
+        return "`gh %s` is not a gh command this guard knows to be read-only" % group
+    verb = first_word(rest)
+    if verb in allowed:
+        return None
+    return ("`gh %s %s` is not one of the read-only `gh %s` commands (%s)"
+            % (group, verb, group, ", ".join(sorted(v for v in allowed if v))))
 
 
 def denied_verb(args, denied):
@@ -461,7 +731,10 @@ def denied_pair(args, pairs):
 
 
 def check_package(name, args, depth=0):
-    if name in ("python", "python3", "python2"):
+    match = VERSIONED.match(name)
+    if match:
+        name = match.group(1)
+    if name in ("python", "py"):
         if "-m" in args:
             idx = args.index("-m")
             if idx + 1 < len(args) and args[idx + 1] == "pip":
@@ -501,7 +774,13 @@ def check_package(name, args, depth=0):
 
 
 def check_segment(argv, depth, scan=True):
-    argv, recognised = strip_wrappers(argv)
+    while argv and argv[0] in KEYWORDS_DROP:
+        argv = argv[1:]
+    if argv and argv[0] in KEYWORDS_SKIP:
+        return None
+    argv, recognised, reason = strip_wrappers(argv)
+    if reason:
+        return reason
     if not recognised and scan:
         return scan_positions(argv, depth)
     if not argv:
@@ -509,17 +788,60 @@ def check_segment(argv, depth, scan=True):
     name = base(argv[0])
     args = argv[1:]
 
-    if name == "git":
-        return check_git(args)
+    # `$g commit`, `$(which git) commit`: the command is whatever the expansion
+    # produces, which the guard cannot know. A literal basename after an
+    # expanded directory (`"$VENV/bin/pytest"`) is fine.
+    if not name or name[0] in "$`":
+        return ("the command name `%s` is a shell expansion; spell the command "
+                "out" % argv[0])
+
+    if name in ("git", "hub"):
+        return check_git(args, name)
+
+    if name == "gh":
+        return check_gh(args)
 
     if name in SHELLS:
-        for idx, token in enumerate(args):
-            if token in ("-c", "-lc") and idx + 1 < len(args):
-                return check_command(args[idx + 1], depth + 1)
-        return None
+        return check_shell(name, args, depth)
+
+    if name == "su":
+        return check_su(args, depth)
 
     if name in POWERSHELLS:
         return scan_text(" ".join(args), depth + 1)
+
+    if name == "eval":
+        return check_command(" ".join(args), depth + 1)
+
+    if name == "trap":
+        body = first_word(args)
+        return check_command(body, depth + 1) if body else None
+
+    if name in ("export", "declare", "typeset", "readonly", "local"):
+        for arg in args:
+            if ENV_ASSIGN.match(arg):
+                reason = check_env(arg)
+                if reason:
+                    return reason
+        return None
+
+    if name == "alias" and any("=" in arg for arg in args):
+        return "`alias` can rename a command the guard would deny"
+    if name == "hash" and "-p" in args:
+        return "`hash -p` can point a command name at another binary"
+    if name == "enable" and "-f" in args:
+        return "`enable -f` loads a builtin from a shared object"
+
+    if name == "find":
+        for idx, arg in enumerate(args):
+            if arg in FIND_EXEC:
+                reason = scan_positions(args[idx + 1:], depth)
+                if reason:
+                    return reason
+        return None
+
+    if name in SCAN_ALL:
+        return scan_positions(args, depth)
 
     return check_package(name, args, depth)
 
