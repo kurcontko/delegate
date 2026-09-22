@@ -74,14 +74,18 @@ WRAPPERS = {
                "--color", "--differences", "--errexit", "--chgexit",
                "--precise", "--no-title", "--exec"},
               {"-n", "--interval"}),
+    "ionice": ({"-t", "--ignore"},
+               {"-c", "-n", "-p", "-P", "-u", "--class", "--classdata", "--pid",
+                "--pgid", "--uid"}),
     # No options are modelled: any option sends the rest to the position scan.
     "parallel": (set(), set()),
 }
-
-# Commands whose arguments are scanned from every position, because the real
-# command starts somewhere after a host name or an option the guard does not
-# model.
-SCAN_ALL = {"ssh"}
+# Wrappers whose first positional is not the command (a lock file, a root
+# directory), or whose options are too many to model: every position after
+# the name is scanned.
+SCAN_ALL = {"ssh", "flock", "chroot", "unshare", "tmux", "screen", "script"}
+# Commands that read a command list from stdin or a file the guard cannot see.
+DEFERRED = {"at", "batch"}
 
 # Shell reserved words that may start a segment without being a command.
 # `for`, `case` and `select` head a clause whose words are data, so that
@@ -162,7 +166,7 @@ GIT_READ_ONLY = {
     "diff-files", "show-ref", "show-branch", "for-each-ref", "name-rev",
     "whatchanged", "range-diff", "cherry", "count-objects", "verify-commit",
     "verify-tag", "check-ignore", "check-attr", "check-ref-format", "var",
-    "version", "help",
+    "version", "help", "fsck", "verify-pack", "archive",
 }
 
 # `tag` and `branch` list or write depending on their flags. They pass only
@@ -195,6 +199,7 @@ GIT_SUB_ALLOW = {
     "reflog": {None, "show", "list", "exists"},
     "notes": {None, "list", "show"},
     "lfs": {"ls-files", "status", "env"},
+    "bundle": {"verify", "list-heads"},
 }
 # `gh` is an allow list like git: group -> read-only verbs, `None` for the
 # bare group (which prints help). `search` verbs all read. `api` is handled
@@ -302,17 +307,30 @@ ADVICE = (
 # --- tokenising -------------------------------------------------------------
 
 def join_lines(command):
-    """Turn unquoted newlines into `;` so they separate commands."""
+    """Turn unquoted newlines into `;` so they separate commands.
+
+    A backslash-newline is a continuation and is dropped, so `git\\<newline>
+    commit` is one command. An unquoted `#` starts a comment that runs to the
+    end of its line: it is dropped here, because once the newline has become
+    `;` the tokenizer would take the comment to run to the end of the whole
+    string and every later command with it.
+    """
     out = []
     quote = None
     escaped = False
+    comment = False
     for ch in command:
+        if comment:
+            if ch == "\n":
+                comment = False
+                out.append(";")
+            continue
         if escaped:
-            out.append(ch)
+            if ch != "\n":
+                out.append("\\" + ch)
             escaped = False
             continue
         if ch == "\\" and quote != "'":
-            out.append(ch)
             escaped = True
             continue
         if quote:
@@ -324,6 +342,9 @@ def join_lines(command):
             quote = ch
             out.append(ch)
             continue
+        if ch == "#" and (not out or out[-1] in " \t;&|()"):
+            comment = True
+            continue
         out.append(";" if ch == "\n" else ch)
     return "".join(out)
 
@@ -331,6 +352,7 @@ def join_lines(command):
 def tokenize(command):
     lex = shlex.shlex(command, posix=True, punctuation_chars=True)
     lex.whitespace_split = True
+    lex.commenters = ""  # comments are gone by now; a `#` in a word is data
     return list(lex)
 
 
@@ -458,7 +480,7 @@ def check_env(token):
     return None
 
 
-def strip_wrappers(argv):
+def strip_wrappers(argv, depth=0):
     """Drop leading env assignments and wrappers such as `sudo` or `xargs`.
 
     Returns `(rest, recognised, reason)`. `recognised` is False when a wrapper
@@ -496,6 +518,17 @@ def strip_wrappers(argv):
                 break
             is_long = arg.startswith("--")
             opt = arg.split("=", 1)[0] if is_long else arg
+            if name == "env" and opt in ("-S", "--split-string"):
+                # The value is itself a command line.
+                if is_long and "=" in arg:
+                    value = arg.split("=", 1)[1]
+                else:
+                    value = argv[i] if i < len(argv) else ""
+                    i += 1
+                reason = check_command(value, depth + 1)
+                if reason:
+                    return argv[i:], True, reason
+                continue
             if opt in flags:
                 continue
             if opt in value_flags:
@@ -600,6 +633,12 @@ def check_git(args, name="git"):
         return None
     sub = args[i].lower()
     rest = args[i + 1:]
+
+    # git answers `--help` before running any subcommand, and `-h` as the
+    # only argument prints usage.
+    before_dashes = rest[:rest.index("--")] if "--" in rest else rest
+    if "--help" in before_dashes or rest[:1] == ["-h"]:
+        return None
 
     if sub == "grep":
         for arg in rest:
@@ -778,7 +817,7 @@ def check_segment(argv, depth, scan=True):
         argv = argv[1:]
     if argv and argv[0] in KEYWORDS_SKIP:
         return None
-    argv, recognised, reason = strip_wrappers(argv)
+    argv, recognised, reason = strip_wrappers(argv, depth)
     if reason:
         return reason
     if not recognised and scan:
@@ -791,12 +830,22 @@ def check_segment(argv, depth, scan=True):
     # `$g commit`, `$(which git) commit`: the command is whatever the expansion
     # produces, which the guard cannot know. A literal basename after an
     # expanded directory (`"$VENV/bin/pytest"`) is fine.
-    if not name or name[0] in "$`":
+    if not name or name[0] in "$`{":
         return ("the command name `%s` is a shell expansion; spell the command "
                 "out" % argv[0])
 
     if name in ("git", "hub"):
         return check_git(args, name)
+    if name.startswith("git-") and len(name) > 4:
+        # `git-commit` and friends in libexec/git-core are the subcommands as
+        # binaries; `git-lfs`, `git-flow` are extensions git would run as
+        # `git lfs`. Check them all as the corresponding `git` command.
+        return check_git([name[4:]] + args, "git")
+
+    if name in DEFERRED:
+        return "`%s` runs commands later, from input this guard cannot see" % name
+    if name == "crontab" and "-l" not in args:
+        return "`crontab` installs commands that run later"
 
     if name == "gh":
         return check_gh(args)

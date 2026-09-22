@@ -13,8 +13,8 @@ agents. The main conversation and the `executor` are never affected.
 
 **Git is an allow list.** A subcommand runs only if the guard knows it to be
 read-only (`status`, `log`, `diff`, `show`, `blame`, `rev-parse`, `ls-remote`,
-`stash list`, `reflog show`, `branch` and `tag` listings, `config` reads, and
-the like). Everything else is denied, including plumbing such as `update-index`
+`stash list`, `reflog show`, `branch` and `tag` listings, `config` reads,
+`fsck`, `archive`, and the like; `--help` on anything). Everything else is denied, including plumbing such as `update-index`
 and `symbolic-ref`, aliases, and any subcommand, verb or `branch`/`tag` flag the
 guard has never heard of. `git fetch` is denied too, because it moves refs:
 fetch in the main conversation before delegating, or have the worker read the
@@ -37,13 +37,16 @@ the same commands run through `uv run`, `poetry run`, `npm exec` or `npx`.
 `npm test`, `pytest`, `cargo test` and `uv run pytest` are left alone.
 
 **Indirection is followed.** The guard parses Bash commands with `shlex`, so it
-follows `&&`, pipes, newlines, `$(...)`, `bash -c` (bundled as `-ec` too),
-`eval`, `trap`, `find -exec`, `su -c`, `ssh`, `watch`, wrappers like `sudo`,
-`timeout` and `xargs`, shell keywords (`if … then git commit`), and absolute
-paths. It denies what it cannot follow: a shell fed from stdin or a here-string
-(`curl … | sh`, `bash <<< "…"`), a command name that is an expansion (`$g
-commit`, `$(which git) commit`), and `alias`, `hash -p` and `enable -f`, which
-change what a name runs. Environment variables that redirect execution
+follows `&&`, pipes, newlines, comments, line continuations, `$(...)`,
+`bash -c` (bundled as `-ec` too), `eval`, `trap`, `find -exec`, `su -c`,
+`env -S`, `ssh`, `flock`, `watch`, `tmux`, wrappers like `sudo`, `ionice`,
+`timeout` and `xargs`, shell keywords (`if … then git commit`), absolute
+paths, and the dashed binaries (`git-commit`, `git-lfs`). It denies what it
+cannot follow: a shell fed from stdin or a here-string (`curl … | sh`,
+`bash <<< "…"`), a command name that is an expansion (`$g commit`,
+`$(which git) commit`, `{git,x} commit`), `at`, `batch` and `crontab`, which
+run commands later, and `alias`, `hash -p` and `enable -f`, which change what
+a name runs. Environment variables that redirect execution
 (`PATH`, `HOME`, `GIT_EXEC_PATH`, `GIT_SSH_COMMAND`, `GIT_CONFIG_*`, `LD_*`,
 `BASH_ENV`, and a `GIT_PAGER` not set to `cat`) are denied as prefixes, in
 `env`, and in `export`. It does not fire on a mutating word inside a quoted

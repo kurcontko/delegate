@@ -87,9 +87,9 @@ those two agents:
   `cargo add`, `go get`, …), also through `uv run`, `npx` and the like. Test
   runners are left alone.
 - **Indirection is followed or denied.** `bash -c`, `eval`, `find -exec`,
-  `xargs`, `sudo` and shell keywords are looked through; a shell fed from
-  stdin, a command name that is a variable, and `PATH`- or `GIT_*`-style
-  variables that redirect execution are denied.
+  `xargs`, `sudo`, comments and shell keywords are looked through; a shell
+  fed from stdin, a command name that is a variable, schedulers like `at`, and
+  `PATH`- or `GIT_*`-style variables that redirect execution are denied.
 - **It is not a sandbox.** File writes, interpreters (`python -c`), scripts,
   build tools and a hostile repository config cannot be told apart from
   legitimate work by reading a command line, so for those the rule remains an

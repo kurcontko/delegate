@@ -884,6 +884,91 @@ class TestGitHubClis(GuardTestCase):
         self.assertAllowed("hub status")
 
 
+class TestTextForms(GuardTestCase):
+    """Comments, continuations and binary names that hide `git`."""
+
+    def test_comment_does_not_swallow_later_commands(self):
+        for command in [
+            "# note\ngit commit -m x",
+            "git status # ok\ngit push",
+            "# step 1\npytest\n# step 2\ngit add .",
+        ]:
+            with self.subTest(command=command):
+                self.assertDenied(command)
+        for command in [
+            "# note\ngit status",
+            "git log --grep=#foo",
+            "echo '#'",
+            "# git commit is mentioned here\npytest",
+        ]:
+            with self.subTest(command=command):
+                self.assertAllowed(command)
+
+    def test_line_continuation_joins_the_command(self):
+        self.assertDenied("git\\\n commit -m x")
+        self.assertDenied("git commit \\\n -m x")
+        self.assertAllowed("git log \\\n --oneline")
+        self.assertAllowed("echo a\\")
+
+    def test_dashed_git_binaries_are_git(self):
+        for command in [
+            "git-commit -m x",
+            "git-push origin main",
+            "/usr/lib/git-core/git-push origin",
+            "git-lfs pull",
+            "git-flow feature start x",
+        ]:
+            with self.subTest(command=command):
+                self.assertDenied(command)
+        self.assertAllowed("git-log --oneline")
+        self.assertAllowed("git-lfs ls-files")
+
+    def test_env_split_string_checked(self):
+        self.assertDenied("env --split-string='git commit -m x'")
+        self.assertDenied("env -S 'git push'")
+        self.assertAllowed("env --split-string='git status'")
+
+    def test_brace_expansion_in_command_position_denied(self):
+        self.assertDenied("{git,true} commit")
+
+    def test_more_wrappers_and_schedulers(self):
+        for command in [
+            "script -c 'git commit' /dev/null",
+            "flock /tmp/l git commit",
+            "flock -c 'git push' /tmp/l",
+            "ionice -c3 git commit",
+            "tmux new-session -d 'git commit'",
+            "screen -dm git commit",
+            "chroot / git commit",
+            "unshare -r git commit",
+            "echo 'git commit' | at now",
+            "batch",
+            "crontab -e",
+        ]:
+            with self.subTest(command=command):
+                self.assertDenied(command)
+        for command in [
+            "ionice -c3 pytest",
+            "flock /tmp/l pytest",
+            "script -c 'pytest' /dev/null",
+            "tmux ls",
+            "screen -ls",
+            "crontab -l",
+        ]:
+            with self.subTest(command=command):
+                self.assertAllowed(command)
+
+    def test_help_on_any_subcommand_allowed(self):
+        for command in ["git commit --help", "git push --help", "git commit -h",
+                        "git fsck --connectivity-only", "git verify-pack -v x",
+                        "git bundle verify x.bundle",
+                        "git archive --format=tar HEAD | tar -t"]:
+            with self.subTest(command=command):
+                self.assertAllowed(command)
+        self.assertDenied("git commit -m x -- -h")
+        self.assertDenied("git bundle create x.bundle HEAD")
+
+
 class TestQuotedStrings(GuardTestCase):
     def test_mutating_words_inside_quotes_allowed(self):
         for command in [
