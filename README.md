@@ -110,7 +110,8 @@ and the hook snippet for plain-file installs: [docs/readonly-guard.md](docs/read
   `sonnet` are aliases, so each follows the current model of that tier.
 - To keep MCP tools away from the researcher, replace its `disallowedTools`
   line with `tools: Read, Grep, Glob, Bash, PowerShell, WebSearch, WebFetch`.
-- The plugin sets no `version`, so installs track the latest commit.
+- Releases are the `version` in `plugin.json`. A marketplace install updates
+  only when that field changes, so bump it with anything users should get.
 
 ## Evals
 
